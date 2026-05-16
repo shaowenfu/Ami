@@ -23,6 +23,10 @@ EOF
 
 echo "${ACR_PASSWORD}" | docker login "${ACR_REGISTRY}" -u "${ACR_USERNAME}" --password-stdin
 
+trim_value() {
+  printf '%s' "$1" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+}
+
 validate_image_ref() {
   local name="$1"
   local value="$2"
@@ -42,6 +46,9 @@ validate_image_ref() {
     exit 1
   fi
 }
+
+IMAGE_REF=$(trim_value "${IMAGE_REF}")
+REDIS_IMAGE=$(trim_value "${REDIS_IMAGE}")
 
 validate_image_ref IMAGE_REF "${IMAGE_REF}"
 validate_image_ref REDIS_IMAGE "${REDIS_IMAGE}"
