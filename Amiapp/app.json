@@ -1,0 +1,27 @@
+{
+  "expo": {
+    "name": "Ami",
+    "slug": "ami",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.ami.app"
+    },
+    "android": {
+      "package": "com.ami.app"
+    },
+    "web": {
+      "favicon": ""
+    },
+    "plugins": [
+      "expo-router",
+      "expo-asset"
+    ],
+    "scheme": "ami",
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
