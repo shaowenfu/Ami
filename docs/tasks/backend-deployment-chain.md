@@ -186,7 +186,7 @@ ARK_API_KEY
 ```text
 ACR_USERNAME=SherwenF
 ACR_REGISTRY=crpi-oatwdzh41nknuewb.cn-chengdu.personal.cr.aliyuncs.com
-ACR_IMAGE_NAME=crpi-oatwdzh41nknuewb.cn-chengdu.personal.cr.aliyuncs.com/ami/amiend
+ACR_IMAGE_NAME=crpi-oatwdzh41nknuewb.cn-chengdu.personal.cr.aliyuncs.com/sherwen_projects/ami
 ```
 
 建议：
