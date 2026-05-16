@@ -1,57 +1,50 @@
-"""User repository for MySQL backed persistence."""
+"""User repository backed by MongoDB Atlas."""
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Optional
-from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import or_, select, update
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo import ASCENDING, ReturnDocument
+from pymongo.errors import DuplicateKeyError
 
-from infrastructure.models.user import DBUser, User
+from infrastructure.models.user import DBUser
 
 
 class UserRepository:
-    """Data access layer for `users` table (MySQL domain)."""
+    """Data access layer for the `users` collection."""
 
-    def __init__(self, session: AsyncSession) -> None:
-        self._session = session
+    def __init__(self, database: AsyncIOMotorDatabase) -> None:
+        self._collection = database["users"]
+        self._indexes_ready = False
+
+    async def _ensure_indexes(self) -> None:
+        if self._indexes_ready:
+            return
+        await self._collection.create_index([("username", ASCENDING)], unique=True)
+        await self._collection.create_index([("phone", ASCENDING)], unique=True)
+        self._indexes_ready = True
 
     async def get_by_id(self, user_id: str) -> Optional[DBUser]:
-        result = await self._session.execute(select(User).where(User.id == user_id))
-        record = result.scalar_one_or_none()
-        if record is None:
-            return None
-        return DBUser.model_validate(record)
+        await self._ensure_indexes()
+        return self._to_user(await self._collection.find_one({"id": user_id}))
 
     async def get_by_username(self, username: str) -> Optional[DBUser]:
-        result = await self._session.execute(select(User).where(User.username == username))
-        record = result.scalar_one_or_none()
-        if record is None:
-            return None
-        return DBUser.model_validate(record)
+        await self._ensure_indexes()
+        return self._to_user(await self._collection.find_one({"username": username}))
 
     async def get_by_phone(self, phone: str) -> Optional[DBUser]:
-        result = await self._session.execute(select(User).where(User.phone == phone))
-        record = result.scalar_one_or_none()
-        if record is None:
-            return None
-        return DBUser.model_validate(record)
+        await self._ensure_indexes()
+        return self._to_user(await self._collection.find_one({"phone": phone}))
 
     async def get_by_identifier(self, identifier: str) -> Optional[DBUser]:
-        statement = select(User).where(
-            or_(
-                User.username == identifier,
-                User.phone == identifier,
-            )
+        await self._ensure_indexes()
+        document = await self._collection.find_one(
+            {"$or": [{"username": identifier}, {"phone": identifier}]}
         )
-        result = await self._session.execute(statement)
-        record = result.scalar_one_or_none()
-        if record is None:
-            return None
-        return DBUser.model_validate(record)
+        return self._to_user(document)
 
     async def create_user(
         self,
@@ -61,45 +54,49 @@ class UserRepository:
         phone_verified_at=None,
         user_id: Optional[str] = None,
     ) -> Optional[DBUser]:
-        user = User(
-            id=user_id or str(uuid4()),
-            username=username,
-            phone=phone,
-            password_hash=password_hash,
-            phone_verified_at=phone_verified_at,
-        )
-        self._session.add(user)
-
+        await self._ensure_indexes()
+        now = datetime.now(timezone.utc)
+        document = {
+            "id": user_id or str(uuid4()),
+            "username": username,
+            "phone": phone,
+            "password_hash": password_hash,
+            "is_active": True,
+            "phone_verified_at": phone_verified_at,
+            "created_at": now,
+            "updated_at": now,
+        }
         try:
-            await self._session.commit()
-        except IntegrityError:
-            await self._session.rollback()
+            await self._collection.insert_one(document)
+        except DuplicateKeyError:
             return None
-
-        await self._session.refresh(user)
-        return DBUser.model_validate(user)
+        return DBUser.model_validate(document)
 
     async def update_password(self, user_id: str, new_password_hash: str) -> bool:
-        statement = (
-            update(User)
-            .where(User.id == user_id)
-            .values(password_hash=new_password_hash)
-            .execution_options(synchronize_session="fetch")
+        await self._ensure_indexes()
+        result = await self._collection.update_one(
+            {"id": user_id},
+            {
+                "$set": {
+                    "password_hash": new_password_hash,
+                    "updated_at": datetime.now(timezone.utc),
+                }
+            },
         )
-        result = await self._session.execute(statement)
-        await self._session.commit()
-        return result.rowcount > 0
+        return result.modified_count > 0
 
     async def set_active(self, user_id: str, is_active: bool) -> bool:
-        statement = (
-            update(User)
-            .where(User.id == user_id)
-            .values(is_active=is_active)
-            .execution_options(synchronize_session="fetch")
+        await self._ensure_indexes()
+        result = await self._collection.update_one(
+            {"id": user_id},
+            {
+                "$set": {
+                    "is_active": is_active,
+                    "updated_at": datetime.now(timezone.utc),
+                }
+            },
         )
-        result = await self._session.execute(statement)
-        await self._session.commit()
-        return result.rowcount > 0
+        return result.modified_count > 0
 
     async def reactivate_user(
         self,
@@ -108,30 +105,27 @@ class UserRepository:
         password_hash: str,
         phone_verified_at: datetime,
     ) -> Optional[DBUser]:
-        """
-        Reactivate a previously deactivated user with a new username/password.
-        Returns the updated user or None if uniqueness constraints fail.
-        """
-        statement = (
-            update(User)
-            .where(User.id == user_id)
-            .values(
-                username=username,
-                password_hash=password_hash,
-                is_active=True,
-                phone_verified_at=phone_verified_at,
-            )
-            .execution_options(synchronize_session="fetch")
-        )
+        await self._ensure_indexes()
         try:
-            await self._session.execute(statement)
-            await self._session.commit()
-        except IntegrityError:
-            await self._session.rollback()
+            result = await self._collection.find_one_and_update(
+                {"id": user_id},
+                {
+                    "$set": {
+                        "username": username,
+                        "password_hash": password_hash,
+                        "is_active": True,
+                        "phone_verified_at": phone_verified_at,
+                        "updated_at": datetime.now(timezone.utc),
+                    }
+                },
+                return_document=ReturnDocument.AFTER,
+            )
+        except DuplicateKeyError:
             return None
+        return self._to_user(result)
 
-        result = await self._session.execute(select(User).where(User.id == user_id))
-        record = result.scalar_one_or_none()
-        if record is None:
+    @staticmethod
+    def _to_user(document: Optional[dict]) -> Optional[DBUser]:
+        if document is None:
             return None
-        return DBUser.model_validate(record)
+        return DBUser.model_validate(document)

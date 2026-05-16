@@ -8,7 +8,6 @@ from fastapi.staticfiles import StaticFiles
 
 # 从 DB 层导入连接管理函数
 from infrastructure.db.mongo_client import connect_to_mongo, close_mongo_connection
-from infrastructure.db.mysql_client import connect_to_mysql, close_mysql_connection
 from infrastructure.db.redis_client import connect_to_redis, close_redis_connection
 
 # 导入配置、路由等
@@ -43,9 +42,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # 建立 MongoDB 连接
     await connect_to_mongo()
 
-    # 建立 MySQL 连接
-    await connect_to_mysql()
-
     # 建立 Redis 连接
     await connect_to_redis()
 
@@ -72,9 +68,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     
     # 关闭 Redis 连接
     await close_redis_connection()
-
-    # 关闭 MySQL 连接
-    await close_mysql_connection()
 
     # 关闭 LLM 相关客户端（如已使用）
     await close_model_service()

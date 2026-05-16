@@ -1,0 +1,267 @@
+name: deploy-server
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "server/**"
+      - ".github/workflows/deploy-server.yml"
+      - "docker-compose.production.yml"
+  workflow_dispatch:
+
+env:
+  REGISTRY: crpi-oatwdzh41nknuewb.cn-chengdu.personal.cr.aliyuncs.com
+  IMAGE_NAME: crpi-oatwdzh41nknuewb.cn-chengdu.personal.cr.aliyuncs.com/entrocut/entrocut
+  REGISTRY_VPC: crpi-oatwdzh41nknuewb-vpc.cn-chengdu.personal.cr.aliyuncs.com
+  DEPLOY_DIR: /opt/entrocut-server
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      image_ref: ${{ steps.meta.outputs.image_ref }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: SherwenF
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: Extract image metadata
+        id: meta
+        shell: bash
+        run: |
+          IMAGE_REF="${IMAGE_NAME}:${GITHUB_SHA}"
+          echo "image_ref=${IMAGE_REF}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./server
+          file: ./server/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image_ref }}
+            ${{ env.IMAGE_NAME }}:latest
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate required deployment configuration
+        env:
+          SERVER_BASE_URL: ${{ vars.SERVER_BASE_URL }}
+          CORS_ALLOW_ORIGINS: ${{ vars.CORS_ALLOW_ORIGINS }}
+          AUTH_JWT_SECRET: ${{ secrets.AUTH_JWT_SECRET }}
+          AUTH_GOOGLE_CLIENT_ID: ${{ secrets.AUTH_GOOGLE_CLIENT_ID }}
+          AUTH_GOOGLE_CLIENT_SECRET: ${{ secrets.AUTH_GOOGLE_CLIENT_SECRET }}
+          AUTH_GITHUB_CLIENT_ID: ${{ secrets.AUTH_GITHUB_CLIENT_ID }}
+          AUTH_GITHUB_CLIENT_SECRET: ${{ secrets.AUTH_GITHUB_CLIENT_SECRET }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          MONGODB_ATLAS_URI: ${{ secrets.MONGODB_ATLAS_URI }}
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+          DASHVECTOR_API_KEY: ${{ secrets.DASHVECTOR_API_KEY }}
+          DASHVECTOR_ENDPOINT: ${{ secrets.DASHVECTOR_ENDPOINT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          required_names=(
+            SERVER_BASE_URL
+            CORS_ALLOW_ORIGINS
+            AUTH_JWT_SECRET
+            AUTH_GOOGLE_CLIENT_ID
+            AUTH_GOOGLE_CLIENT_SECRET
+            AUTH_GITHUB_CLIENT_ID
+            AUTH_GITHUB_CLIENT_SECRET
+            DEEPSEEK_API_KEY
+            GOOGLE_API_KEY
+            MONGODB_ATLAS_URI
+            DASHSCOPE_API_KEY
+            DASHVECTOR_API_KEY
+            DASHVECTOR_ENDPOINT
+          )
+          for name in "${required_names[@]}"; do
+            value="${!name:-}"
+            if [ -z "${value}" ]; then
+              echo "Missing required deployment configuration: ${name}" >&2
+              exit 1
+            fi
+          done
+
+      - name: Copy compose file to ECS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_SSH_HOST }}
+          username: ${{ secrets.SERVER_SSH_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          source: "docker-compose.production.yml"
+          target: "${{ env.DEPLOY_DIR }}"
+          timeout: 10m
+
+      - name: Deploy on ECS
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          DEPLOY_DIR: ${{ env.DEPLOY_DIR }}
+          IMAGE_REF: ${{ needs.build-and-push.outputs.image_ref }}
+          ACR_USERNAME: SherwenF
+          ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
+          REGISTRY: ${{ env.REGISTRY }}
+          REGISTRY_VPC: ${{ env.REGISTRY_VPC }}
+          MONGODB_ATLAS_URI: ${{ secrets.MONGODB_ATLAS_URI }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+          DASHVECTOR_API_KEY: ${{ secrets.DASHVECTOR_API_KEY }}
+          DASHVECTOR_ENDPOINT: ${{ secrets.DASHVECTOR_ENDPOINT }}
+        with:
+          host: ${{ secrets.SERVER_SSH_HOST }}
+          username: ${{ secrets.SERVER_SSH_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          envs: DEPLOY_DIR,IMAGE_REF,REGISTRY,REGISTRY_VPC,ACR_USERNAME,ACR_PASSWORD,MONGODB_ATLAS_URI,DEEPSEEK_API_KEY,DASHSCOPE_API_KEY,DASHVECTOR_API_KEY,DASHVECTOR_ENDPOINT
+          script_stop: true
+          timeout: 20m
+          command_timeout: 60m
+          script: |
+            set -euo pipefail
+            mkdir -p "${DEPLOY_DIR}"
+            cd "${DEPLOY_DIR}"
+            cat > .env.production <<EOF
+            APP_ENV=staging
+            SERVER_PORT=8001
+            SERVER_LOG_LEVEL=info
+            SERVER_BASE_URL=${{ vars.SERVER_BASE_URL }}
+            OBSERVABILITY_ENABLE_METRICS=true
+            ALLOW_INMEMORY_MONGO_FALLBACK=false
+            ALLOW_INMEMORY_REDIS_FALLBACK=false
+            MONGODB_URI=${MONGODB_ATLAS_URI}
+            MONGODB_DB_NAME=entrocut_server
+            AUTH_JWT_ALGORITHM=HS256
+            AUTH_JWT_SECRET=${{ secrets.AUTH_JWT_SECRET }}
+            AUTH_ACCESS_TOKEN_EXPIRES_SECONDS=3600
+            AUTH_REFRESH_TOKEN_EXPIRES_SECONDS=2592000
+            AUTH_LOGIN_SESSION_TTL_SECONDS=600
+            AUTH_DEEP_LINK_SCHEME=entrocut
+            AUTH_TOKEN_ISSUER=entrocut-server
+            AUTH_TOKEN_AUDIENCE=entrocut-core
+            AUTH_DEV_FALLBACK_ENABLED=false
+            AUTH_GOOGLE_CLIENT_ID=${{ secrets.AUTH_GOOGLE_CLIENT_ID }}
+            AUTH_GOOGLE_CLIENT_SECRET=${{ secrets.AUTH_GOOGLE_CLIENT_SECRET }}
+            AUTH_GITHUB_CLIENT_ID=${{ secrets.AUTH_GITHUB_CLIENT_ID }}
+            AUTH_GITHUB_CLIENT_SECRET=${{ secrets.AUTH_GITHUB_CLIENT_SECRET }}
+            AUTH_GOOGLE_SCOPE=openid email profile
+            CORS_ALLOW_ORIGINS=${{ vars.CORS_ALLOW_ORIGINS }}
+            DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+            GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}
+            DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY}
+            DASHSCOPE_MULTIMODAL_EMBEDDING_MODEL=qwen3-vl-embedding
+            DASHSCOPE_MULTIMODAL_DIMENSION=1024
+            DASHVECTOR_API_KEY=${DASHVECTOR_API_KEY}
+            DASHVECTOR_ENDPOINT=${DASHVECTOR_ENDPOINT}
+            DASHVECTOR_COLLECTION_NAME=entrocut_assets
+            DASHVECTOR_PARTITION=default
+            DASHVECTOR_TIMEOUT_SECONDS=10
+            DASHVECTOR_PROTOCOL=grpc
+            ADMIN_ACCESS_TOKEN=${{ secrets.ADMIN_ACCESS_TOKEN }}
+            EOF
+            echo "${ACR_PASSWORD}" | docker login "${REGISTRY_VPC}" -u "${ACR_USERNAME}" --password-stdin
+            export IMAGE_REF="${IMAGE_REF/${REGISTRY}/${REGISTRY_VPC}}"
+            OLD_IMAGE_REF=$(docker inspect -f '{{.Config.Image}}' entrocut-server 2>/dev/null || true)
+            OLD_IMAGE_ID=""
+            if [ -n "${OLD_IMAGE_REF}" ]; then
+              OLD_IMAGE_ID=$(docker image inspect "${OLD_IMAGE_REF}" --format '{{.Id}}' 2>/dev/null || true)
+            fi
+            docker compose -f docker-compose.production.yml pull
+            docker compose -f docker-compose.production.yml up -d redis
+
+            CANDIDATE_CONTAINER=entrocut-server-candidate
+            docker rm -f "${CANDIDATE_CONTAINER}" || true
+            docker run -d \
+              --name "${CANDIDATE_CONTAINER}" \
+              --network entrocut-server_default \
+              --env-file .env.production \
+              -e APP_ENV=staging \
+              -e SERVER_PORT=8001 \
+              -e REDIS_URL=redis://entrocut-redis:6379/0 \
+              -e AUTH_DEV_FALLBACK_ENABLED=false \
+              -e ALLOW_INMEMORY_MONGO_FALLBACK=false \
+              -e ALLOW_INMEMORY_REDIS_FALLBACK=false \
+              "${IMAGE_REF}" \
+              uvicorn main:app --host 0.0.0.0 --port 8001 --proxy-headers --forwarded-allow-ips=*
+            for i in $(seq 1 30); do
+              LIVE_CODE=$(docker exec "${CANDIDATE_CONTAINER}" curl --silent --output /dev/null --write-out "%{http_code}" http://127.0.0.1:8001/livez || true)
+              READY_CODE=$(docker exec "${CANDIDATE_CONTAINER}" curl --silent --output /dev/null --write-out "%{http_code}" http://127.0.0.1:8001/readyz || true)
+              if [ "${LIVE_CODE}" = "200" ] && [ "${READY_CODE}" = "200" ]; then
+                echo "candidate_ready"
+                break
+              fi
+              if [ "${i}" = "30" ]; then
+                docker logs --tail=200 "${CANDIDATE_CONTAINER}" || true
+                docker rm -f "${CANDIDATE_CONTAINER}" || true
+                exit 1
+              fi
+              echo "candidate_livez=${LIVE_CODE} candidate_readyz=${READY_CODE}"
+              sleep 2
+            done
+
+            docker rm -f entrocut-mock-server || true
+            docker compose -f docker-compose.production.yml up -d --no-deps server || {
+              if [ -n "${OLD_IMAGE_REF}" ]; then
+                echo "deploy_failed_rollback_to=${OLD_IMAGE_REF}"
+                export IMAGE_REF="${OLD_IMAGE_REF}"
+                docker compose -f docker-compose.production.yml up -d --no-deps server || true
+              fi
+              docker rm -f "${CANDIDATE_CONTAINER}" || true
+              exit 1
+            }
+            docker rm -f "${CANDIDATE_CONTAINER}" || true
+            for i in $(seq 1 30); do
+              LIVE_CODE=$(curl --silent --output /dev/null --write-out "%{http_code}" http://127.0.0.1:8001/livez || true)
+              READY_CODE=$(curl --silent --output /dev/null --write-out "%{http_code}" http://127.0.0.1:8001/readyz || true)
+              if [ "${LIVE_CODE}" = "200" ] && [ "${READY_CODE}" = "200" ]; then
+                echo "deploy_ready"
+                curl --silent http://127.0.0.1:8001/ || true
+                echo
+                break
+              fi
+              if [ "${i}" = "30" ]; then
+                if [ -n "${OLD_IMAGE_REF}" ]; then
+                  echo "health_check_failed_rollback_to=${OLD_IMAGE_REF}"
+                  export IMAGE_REF="${OLD_IMAGE_REF}"
+                  docker compose -f docker-compose.production.yml up -d --no-deps server || true
+                fi
+                docker compose -f docker-compose.production.yml ps
+                docker compose -f docker-compose.production.yml logs --tail=200
+                exit 1
+              fi
+              echo "livez=${LIVE_CODE} readyz=${READY_CODE}"
+              if [ "${READY_CODE}" != "200" ]; then
+                curl --silent http://127.0.0.1:8001/readyz || true
+                echo
+              fi
+              sleep 2
+            done
+
+            SERVER_IMAGE_REPO="${REGISTRY_VPC}/entrocut/entrocut"
+            CURRENT_IMAGE_ID=$(docker image inspect "${IMAGE_REF}" --format '{{.Id}}')
+            docker image ls "${SERVER_IMAGE_REPO}" --format '{{.Repository}}:{{.Tag}}' | while read -r IMAGE_TAG; do
+              IMAGE_ID=$(docker image inspect "${IMAGE_TAG}" --format '{{.Id}}' 2>/dev/null || true)
+              if [ -z "${IMAGE_ID}" ]; then
+                continue
+              fi
+              if [ "${IMAGE_ID}" = "${CURRENT_IMAGE_ID}" ] || [ "${IMAGE_ID}" = "${OLD_IMAGE_ID}" ]; then
+                continue
+              fi
+              docker rmi "${IMAGE_TAG}" || true
+            done

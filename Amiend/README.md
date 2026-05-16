@@ -1,151 +1,73 @@
-# 🌟 Nova FastAPI Starter
+# Amiend
 
-> A "Quick-Start" Backend Skeleton for AI Applications: JWT, WebSocket, Pluggable LLM, Optional Memory, and One-Click Dockerization.
+Ami 的 FastAPI 后端服务，当前目标是为移动端快速迭代提供稳定的 API、Auth（鉴权）、WebSocket（实时通信）、LLM Gateway（模型网关）和部署链路。
 
-<p align="left">
-  <a href="./README.md">🇺🇸 English</a> | 
-  <a href="devDocs/README.zh-CN.md">🇨🇳 中文</a>
-</p>
+## 技术栈
 
-![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-green)
-![License](https://img.shields.io/badge/License-MIT-yellow)
+| 层 | 方案 |
+|---|---|
+| Web framework | FastAPI |
+| Auth | JWT + bcrypt |
+| Database | MongoDB Atlas + Motor |
+| Cache | Redis |
+| LLM | OpenAI-compatible SDK |
+| Runtime | Docker + Docker Compose |
 
-## 📖 Vision
-
-We are dedicated to providing a **concise, efficient, and production-grade** backend infrastructure for AI startups and individual developers.
-
-- **🚀 Ready to Launch**: No cumbersome configurations; go from zero to API online in minutes.
-- **🧩 Pluggable Modularity**: JWT authentication, WebSocket streaming, LLM adapters, vector memory—enable only what you need.
-- **🛡️ First Principles & Occam's Razor**: Clear layering, minimal viable defaults, and "fail-fast" error handling, balancing security with maintainability.
-- **🤝 Community-Driven**: An open-source skeleton welcoming contributions (PRs/Issues) for more Vector/LLM adapters and practical examples.
-
----
-
-## ✨ Core Features
-
-- **LLM Agnostic**: A unified `LLMProvider` interface allows you to switch between OpenAI, DeepSeek, Claude, or local LLMs with a single configuration line.
-- **Native Memory**: Built on **[Mem0](https://github.com/mem0ai/mem0)**, providing a plug-and-play adapter and `docker-compose.memory.yml` for vector storage (ChromaDB), disabled by default.
-- **Production Architecture**: 
-  - **DDD-Lite**: Clear `Router` -> `Service` -> `Repository` layering.
-  - **Async First**: Full-stack asynchronous database support (Mongo + MySQL + Redis).
-  - **Security**: Built-in JWT (Access/Refresh Token) and WebSocket authentication mechanisms.
-- **DevOps Ready**: Includes `Dockerfile` and modular `docker-compose` configurations for easy deployment.
-
----
-
-## ⚡ Quick Start
-
-### 1. Setup Environment
+## 本地启动
 
 ```bash
-git clone https://github.com/your-username/nova-fastapi-starter.git
-cd nova-fastapi-starter
-
-# Copy environment variables configuration
+cd Amiend
 cp .env.example .env
+# 编辑 .env，填入 JWT_SECRET_KEY、MONGO_URI、REDIS_PASSWORD、LLM_API_KEY 等
+
+docker compose up -d redis
+
+source venv/bin/activate
+pip install -r requirements.txt
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-### 2. Start Service (Minimal Mode)
-
-In default mode, the system relies only on basic components (MySQL/Redis/Mongo) and does not launch the vector database.
-
-```bash
-docker-compose up -d --build
-```
-
-Access API Documentation: `http://localhost:8000/docs`
-
-### 3. Enable AI Memory (Optional)
-
-If you require RAG (Retrieval-Augmented Generation) or long-term memory capabilities:
-
-1.  Modify `.env` to set `MEMORY_ENABLED=true`.
-2.  Start the configuration including the vector database (ChromaDB):
-
-```bash
-docker-compose -f docker-compose.yml -f docker-compose.memory.yml up -d
-```
-
----
-
-## 🔌 LLM Configuration Guide
-
-Nova uses a standardized OpenAI-compatible layer, supporting almost all mainstream models. Simply modify your `.env` to switch:
-
-**Using DeepSeek / Moonshot / DashScope:**
-```ini
-LLM_BASE_URL=https://api.deepseek.com  # Or other compatible endpoints
-LLM_API_KEY=sk-your-key-here
-LLM_MODEL=deepseek-chat
-```
-
-**Using Local LLM (Ollama/vLLM):**
-```ini
-LLM_BASE_URL=http://localhost:11434/v1
-LLM_API_KEY=ollama
-LLM_MODEL=llama3
-```
-
----
-
-## 🛠️ Directory Structure
+API 文档：
 
 ```text
-├── core/               # Core configuration, exception definitions, logging
-│   └── memory_adapter/ # [Unique] Mem0-based adapter (Connector/Normalizer)
-├── dependencies/       # FastAPI Dependency Injection (Auth, Permissions)
-├── infrastructure/     # Infrastructure layer (DB Clients, Repositories)
-├── routers/            # Routing layer (API interface definitions)
-├── services/           # Business logic layer (Auth, LLM, Chat, SMS)
-└── static/             # Simple test pages (WebSocket Tester, etc.)
+http://localhost:8000/docs
 ```
 
-## 🐛 Debugging (VS Code)
+健康检查：
 
-We provide a pre-configured `.vscode/launch.json`.
-1. Open the project in VS Code.
-2. Select the **Run and Debug** tab.
-3. Choose **"Nova: Debug API (Uvicorn)"** and press F5.
-   - Requires your Python environment to include `uvicorn` and `fastapi`.
+```text
+http://localhost:8000/health
+```
 
-## 🚢 Deployment (GitHub Actions)
+## 生产部署
 
-A template workflow is included in `.github/workflows/deploy.yml`.
-- **Target**: Self-hosted runner (e.g., AWS EC2 with Docker installed).
-- **Setup**:
-  1. Add a runner with tag `ecs-backend` to your repo.
-  2. Create an env file on the runner at `$HOME/backend_env` containing production secrets.
-  3. Push to `main` branch to trigger auto-deployment.
+生产部署由仓库根目录的 GitHub Actions workflow 负责：
 
----
+```text
+.github/workflows/deploy-backend.yml
+```
 
-## 🤝 Contribution
+触发规则：
 
-We highly welcome community contributions! Our current Roadmap includes:
+- `main` 分支下 `Amiend/**` 变化时自动部署。
+- `.github/workflows/deploy-backend.yml` 变化时自动部署。
+- 支持手动 `workflow_dispatch`。
 
-- [ ] Adapting more vector databases (Qdrant, Milvus).
-- [ ] Adding more streaming output examples for various LLM Providers.
-- [ ] Providing frontend demo (React/Vue) integration examples.
+生产 compose 文件：
 
-Please refer to the [Development Regulations](devDocs/develop_regulations.md) for more details.
+```text
+Amiend/docker-compose.production.yml
+```
 
-## 📚 Documentation
+生产环境只在腾讯轻量服务器运行：
 
-- **Development Regulations**: [English](devDocs/develop_regulations.md) | [中文](devDocs/develop_regulations_zh.md) - Architectural principles, directory responsibilities, and coding standards.
-- **Progress Log**: [English](devDocs/PROGRESS.md) | [中文](devDocs/PROGRESS_ZH.md) - Records of architectural changes and major versions.
+- `api`
+- `redis`
 
----
+持久化数据库使用 MongoDB Atlas，不在服务器本地部署 MySQL 或 MongoDB。
 
-## 🙏 Acknowledgements
+完整部署说明见：
 
-Nova is built on the shoulders of giants. Special thanks to:
-
-- [FastAPI](https://fastapi.tiangolo.com/): For the modern, fast web framework.
-- [Mem0](https://github.com/mem0ai/mem0): The core foundation of our memory adapter.
-- [ChromaDB](https://www.trychroma.com/): For the vector storage backend.
-- [SQLAlchemy](https://www.sqlalchemy.org/): For the async ORM foundation.
-
-## 📄 License
-
-MIT © 2025 Nova Contributors
+```text
+docs/tasks/backend-deployment-chain.md
+```

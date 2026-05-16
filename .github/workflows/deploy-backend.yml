@@ -1,0 +1,251 @@
+name: deploy-backend
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "Amiend/**"
+      - ".github/workflows/deploy-backend.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DEFAULT_DEPLOY_DIR: /opt/ami-backend
+  DEFAULT_REDIS_IMAGE: crpi-oatwdzh41nknuewb.cn-chengdu.personal.cr.aliyuncs.com/entrocut/redis:7-alpine
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    outputs:
+      image_ref: ${{ steps.meta.outputs.image_ref }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate image configuration
+        env:
+          ACR_REGISTRY: ${{ vars.ACR_REGISTRY }}
+          ACR_IMAGE_NAME: ${{ vars.ACR_IMAGE_NAME }}
+          ACR_USERNAME: ${{ vars.ACR_USERNAME }}
+          ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in ACR_REGISTRY ACR_USERNAME ACR_IMAGE_NAME ACR_PASSWORD; do
+            if [ -z "${!name:-}" ]; then
+              echo "Missing required deployment configuration: ${name}" >&2
+              exit 1
+            fi
+          done
+
+      - name: Log in to ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ vars.ACR_REGISTRY }}
+          username: ${{ vars.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: Extract image metadata
+        id: meta
+        shell: bash
+        run: |
+          IMAGE_REF="${{ vars.ACR_IMAGE_NAME }}:${GITHUB_SHA}"
+          echo "image_ref=${IMAGE_REF}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./Amiend
+          file: ./Amiend/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image_ref }}
+            ${{ vars.ACR_IMAGE_NAME }}:latest
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate runtime configuration
+        env:
+          SERVER_SSH_HOST: ${{ secrets.SERVER_SSH_HOST }}
+          SERVER_SSH_USER: ${{ secrets.SERVER_SSH_USER }}
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+          ACR_REGISTRY: ${{ vars.ACR_REGISTRY }}
+          ACR_IMAGE_NAME: ${{ vars.ACR_IMAGE_NAME }}
+          ACR_USERNAME: ${{ vars.ACR_USERNAME }}
+          ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
+          JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
+          MONGODB_ATLAS_URI: ${{ secrets.MONGODB_ATLAS_URI }}
+          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          required_names=(
+            SERVER_SSH_HOST
+            SERVER_SSH_USER
+            SERVER_SSH_KEY
+            ACR_REGISTRY
+            ACR_IMAGE_NAME
+            ACR_USERNAME
+            ACR_PASSWORD
+            JWT_SECRET_KEY
+            MONGODB_ATLAS_URI
+            REDIS_PASSWORD
+          )
+          for name in "${required_names[@]}"; do
+            if [ -z "${!name:-}" ]; then
+              echo "Missing required deployment configuration: ${name}" >&2
+              exit 1
+            fi
+          done
+
+      - name: Copy compose file to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_SSH_HOST }}
+          username: ${{ secrets.SERVER_SSH_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          source: "Amiend/docker-compose.production.yml"
+          target: "${{ vars.DEPLOY_DIR || env.DEFAULT_DEPLOY_DIR }}"
+          strip_components: 1
+          timeout: 10m
+
+      - name: Deploy on server
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          DEPLOY_DIR: ${{ vars.DEPLOY_DIR || env.DEFAULT_DEPLOY_DIR }}
+          IMAGE_REF: ${{ needs.build-and-push.outputs.image_ref }}
+          REDIS_IMAGE: ${{ vars.REDIS_IMAGE || env.DEFAULT_REDIS_IMAGE }}
+          ACR_REGISTRY: ${{ vars.ACR_REGISTRY }}
+          ACR_IMAGE_NAME: ${{ vars.ACR_IMAGE_NAME }}
+          ACR_USERNAME: ${{ vars.ACR_USERNAME }}
+          ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
+          APP_NAME: ${{ vars.APP_NAME || 'Ami' }}
+          APP_VERSION: ${{ vars.APP_VERSION || '0.1.0' }}
+          CORS_ORIGINS: ${{ vars.CORS_ORIGINS || '*' }}
+          MONGO_DATABASE: ${{ vars.MONGO_DATABASE || 'ami' }}
+          MONGODB_ATLAS_URI: ${{ secrets.MONGODB_ATLAS_URI }}
+          JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
+          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+          LLM_BASE_URL: ${{ vars.LLM_BASE_URL || 'https://api.openai.com/v1' }}
+          LLM_MODEL: ${{ vars.LLM_MODEL || 'gpt-4o-mini' }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+        with:
+          host: ${{ secrets.SERVER_SSH_HOST }}
+          username: ${{ secrets.SERVER_SSH_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          envs: DEPLOY_DIR,IMAGE_REF,REDIS_IMAGE,ACR_REGISTRY,ACR_IMAGE_NAME,ACR_USERNAME,ACR_PASSWORD,APP_NAME,APP_VERSION,CORS_ORIGINS,MONGO_DATABASE,MONGODB_ATLAS_URI,JWT_SECRET_KEY,REDIS_PASSWORD,LLM_BASE_URL,LLM_MODEL,LLM_API_KEY
+          script_stop: true
+          timeout: 20m
+          command_timeout: 60m
+          script: |
+            set -euo pipefail
+            mkdir -p "${DEPLOY_DIR}"
+            cd "${DEPLOY_DIR}"
+
+            cat > .env.production <<EOF
+            APP_NAME=${APP_NAME}
+            APP_VERSION=${APP_VERSION}
+            JWT_SECRET_KEY=${JWT_SECRET_KEY}
+            JWT_ALGORITHM=HS256
+            ACCESS_TOKEN_EXPIRE_MINUTES=15
+            REFRESH_TOKEN_EXPIRE_MINUTES=10080
+            CORS_ORIGINS=${CORS_ORIGINS}
+            REDIS_HOST=redis
+            REDIS_PORT=6379
+            REDIS_PASSWORD=${REDIS_PASSWORD}
+            MONGO_URI=${MONGODB_ATLAS_URI}
+            MONGO_DATABASE=${MONGO_DATABASE}
+            MEMORY_ENABLED=false
+            DEFAULT_MODEL_PROVIDER=custom
+            LLM_API_KEY=${LLM_API_KEY}
+            LLM_BASE_URL=${LLM_BASE_URL}
+            LLM_MODEL=${LLM_MODEL}
+            EOF
+
+            echo "${ACR_PASSWORD}" | docker login "${ACR_REGISTRY}" -u "${ACR_USERNAME}" --password-stdin
+
+            OLD_IMAGE_REF=$(docker inspect -f '{{.Config.Image}}' ami-api 2>/dev/null || true)
+            OLD_IMAGE_ID=""
+            if [ -n "${OLD_IMAGE_REF}" ]; then
+              OLD_IMAGE_ID=$(docker image inspect "${OLD_IMAGE_REF}" --format '{{.Id}}' 2>/dev/null || true)
+            fi
+
+            export IMAGE_REF REDIS_IMAGE REDIS_PASSWORD
+            docker compose -f docker-compose.production.yml pull
+            docker compose -f docker-compose.production.yml up -d redis
+
+            CANDIDATE_CONTAINER=ami-api-candidate
+            docker rm -f "${CANDIDATE_CONTAINER}" || true
+            docker run -d \
+              --name "${CANDIDATE_CONTAINER}" \
+              --network ami_backend_network \
+              --env-file .env.production \
+              -e REDIS_HOST=redis \
+              "${IMAGE_REF}" \
+              uvicorn main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips=*
+
+            for i in $(seq 1 30); do
+              CODE=$(docker exec "${CANDIDATE_CONTAINER}" curl --silent --output /dev/null --write-out "%{http_code}" http://127.0.0.1:8000/health || true)
+              if [ "${CODE}" = "200" ]; then
+                echo "candidate_ready"
+                break
+              fi
+              if [ "${i}" = "30" ]; then
+                docker logs --tail=200 "${CANDIDATE_CONTAINER}" || true
+                docker rm -f "${CANDIDATE_CONTAINER}" || true
+                exit 1
+              fi
+              echo "candidate_health=${CODE}"
+              sleep 2
+            done
+
+            docker compose -f docker-compose.production.yml up -d --no-deps api || {
+              if [ -n "${OLD_IMAGE_REF}" ]; then
+                echo "deploy_failed_rollback_to=${OLD_IMAGE_REF}"
+                export IMAGE_REF="${OLD_IMAGE_REF}"
+                docker compose -f docker-compose.production.yml up -d --no-deps api || true
+              fi
+              docker rm -f "${CANDIDATE_CONTAINER}" || true
+              exit 1
+            }
+            docker rm -f "${CANDIDATE_CONTAINER}" || true
+
+            for i in $(seq 1 30); do
+              CODE=$(curl --silent --output /dev/null --write-out "%{http_code}" http://127.0.0.1:8000/health || true)
+              if [ "${CODE}" = "200" ]; then
+                echo "deploy_ready"
+                break
+              fi
+              if [ "${i}" = "30" ]; then
+                if [ -n "${OLD_IMAGE_REF}" ]; then
+                  echo "health_check_failed_rollback_to=${OLD_IMAGE_REF}"
+                  export IMAGE_REF="${OLD_IMAGE_REF}"
+                  docker compose -f docker-compose.production.yml up -d --no-deps api || true
+                fi
+                docker compose -f docker-compose.production.yml ps
+                docker compose -f docker-compose.production.yml logs --tail=200
+                exit 1
+              fi
+              echo "health=${CODE}"
+              sleep 2
+            done
+
+            CURRENT_IMAGE_ID=$(docker image inspect "${IMAGE_REF}" --format '{{.Id}}')
+            docker image ls "${ACR_IMAGE_NAME}" --format '{{.Repository}}:{{.Tag}}' | while read -r IMAGE_TAG; do
+              IMAGE_ID=$(docker image inspect "${IMAGE_TAG}" --format '{{.Id}}' 2>/dev/null || true)
+              if [ -z "${IMAGE_ID}" ]; then
+                continue
+              fi
+              if [ "${IMAGE_ID}" = "${CURRENT_IMAGE_ID}" ] || [ "${IMAGE_ID}" = "${OLD_IMAGE_ID}" ]; then
+                continue
+              fi
+              docker rmi "${IMAGE_TAG}" || true
+            done

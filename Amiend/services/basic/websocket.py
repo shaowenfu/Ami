@@ -9,7 +9,7 @@ from core.exceptions import WebSocketMessageError, WebSocketConnectionError
 from core.logger import get_logger
 
 if TYPE_CHECKING:  # pragma: no cover
-    from services.llm import ModelService
+    from services.basic.llm import ModelService
 
 logger = get_logger(__name__)
 

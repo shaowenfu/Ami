@@ -41,7 +41,7 @@ from infrastructure.models.user import (
 )
 from infrastructure.repositories.user_repository import UserRepository
 from typing import Optional
-from services.sms import SmsService
+from services.basic.sms import SmsService
 
 
 # bcrypt configuration

@@ -7,7 +7,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from core.exceptions import InvalidTokenError
 from core.exceptions import WebSocketAuthenticationError
-from services.auth import TokenService
+from services.basic.auth import TokenService
 from core.logger import get_logger
 
 security = HTTPBearer(auto_error=False)

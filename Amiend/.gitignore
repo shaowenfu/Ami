@@ -29,3 +29,4 @@ build/
 core/memory_adapter/storage/
 scripts/private/
 my_docs/
+temp/

@@ -3,17 +3,16 @@
 from typing import Annotated, Optional
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings
 from core.logger import get_logger
 from dependencies.auth import get_current_user_id
-from infrastructure.db.mysql_client import get_mysql_session
+from infrastructure.db.mongo_client import get_database
 from infrastructure.db.redis_client import get_redis_client
 from infrastructure.repositories.user_repository import UserRepository
-from services.auth import AuthService, TokenService
-from services.llm import ModelService
-from services.sms import SmsService
+from services.basic.auth import AuthService, TokenService
+from services.basic.llm import ModelService
+from services.basic.sms import SmsService
 
 logger = get_logger(__name__)
 
@@ -55,12 +54,10 @@ async def close_model_service() -> None:
 # Repository providers
 # -----------------------------------------------------------------
 
-async def get_user_repository(
-    session: Annotated[AsyncSession, Depends(get_mysql_session)]
-) -> UserRepository:
-    """Provide UserRepository bound to a MySQL session."""
+async def get_user_repository() -> UserRepository:
+    """Provide UserRepository bound to the default MongoDB database."""
 
-    return UserRepository(session)
+    return UserRepository(get_database())
 
 
 # -----------------------------------------------------------------
