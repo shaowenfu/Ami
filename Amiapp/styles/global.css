@@ -1,77 +1,38 @@
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700;800&family=Nunito:wght@700;800;900&display=swap");
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   :root {
-    /* Obsidian Light (Default) */
-    --background: #f1f5f9;
-    --foreground: #0f1729;
-    --card: #f8fafc;
-    --card-foreground: #0f1729;
-    --popover: #e1e7ef;
-    --popover-foreground: #0f1729;
-    --primary: #36404f;
-    --primary-foreground: #f9fafb;
-    --secondary: #465467;
-    --secondary-foreground: #f8fafc;
-    --accent: #f8fafc;
-    --accent-foreground: #637288;
-    --muted: #94a3b8;
-    --muted-foreground: #0f1729;
-    --destructive: #db2424;
-    --destructive-foreground: #fef1f1;
-    --border: #c8d3df;
-    --input: #c8d3df;
-    --ring: #36404f;
-    --radius: 0rem;
+    --background: #f6f3fb;
+    --foreground: #302d36;
+    --card: #fffafd;
+    --card-foreground: #302d36;
+    --popover: #fffafd;
+    --popover-foreground: #302d36;
+    --primary: #8f7cf4;
+    --primary-foreground: #fffafd;
+    --secondary: #eec9d3;
+    --secondary-foreground: #302d36;
+    --accent: #d7efe8;
+    --accent-foreground: #302d36;
+    --muted: #e8e1ef;
+    --muted-foreground: #625d69;
+    --destructive: #d95d70;
+    --destructive-foreground: #fffafd;
+    --border: #e7dfed;
+    --input: #eee8f4;
+    --ring: #8f7cf4;
+    --radius: 1.5rem;
   }
+}
 
-  .harvest-dark {
-    /* Harvest Dark */
-    --background: #171717;
-    --foreground: #fafafa;
-    --card: #242424;
-    --card-foreground: #fafafa;
-    --popover: #404040;
-    --popover-foreground: #fafafa;
-    --primary: #fa8f38;
-    --primary-foreground: #411207;
-    --secondary: #737373;
-    --secondary-foreground: #fafafa;
-    --accent: #441903;
-    --accent-foreground: #fbbd23;
-    --muted: #737373;
-    --muted-foreground: #fafafa;
-    --destructive: #ef4343;
-    --destructive-foreground: #fef1f1;
-    --border: #525252;
-    --input: #525252;
-    --ring: #fa8f38;
-    --radius: 0.75rem;
-  }
-
-  .solar-light {
-    /* Solar Light */
-    --background: #f3f3f2;
-    --foreground: #1c1917;
-    --card: #f8f8f7;
-    --card-foreground: #1c1917;
-    --popover: #e7e5e4;
-    --popover-foreground: #1c1917;
-    --primary: #f59b0a;
-    --primary-foreground: #fffbeb;
-    --secondary: #766f6b;
-    --secondary-foreground: #f8f8f7;
-    --accent: #fffbeb;
-    --accent-foreground: #f59b0a;
-    --muted: #d3d1cf;
-    --muted-foreground: #1c1917;
-    --destructive: #db2424;
-    --destructive-foreground: #fef1f1;
-    --border: #d3d1cf;
-    --input: #d3d1cf;
-    --ring: #f59b0a;
-    --radius: 1rem;
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
   }
 }
