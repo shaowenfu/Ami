@@ -7,7 +7,7 @@ Environment variables (examples):
 - REDIS_HOST / REDIS_PORT / REDIS_PASSWORD
 - JWT_SECRET_KEY / JWT_ALGORITHM / ACCESS_TOKEN_EXPIRE_MINUTES / REFRESH_TOKEN_EXPIRE_MINUTES
 - CORS_ORIGINS (comma separated, "*" allowed)
-- WEBSOCKET_MAX_MESSAGE_SIZE / WEBSOCKET_MAX_CONNECTIONS / WEBSOCKET_TIMEOUT
+- SSE_HEARTBEAT_INTERVAL_SECONDS / SSE_RECONNECT_RETRY_MS / SSE_MAX_CONNECTIONS_PER_USER
 - MEMORY_* (see core.memory_adapter.config)
 - LLM_* (provider-specific fields are intentionally placeholders; implement your own mapping in services/basic/llm.py)
 - SMS_* (optional; see services/basic/sms.py for expected fields)
@@ -60,11 +60,11 @@ class Settings:
             else [origin.strip() for origin in cors_origins_env.split(",") if origin.strip()]
         )
 
-        # WebSocket limits
-        self.WEBSOCKET_TIMEOUT: int = int(os.getenv("WEBSOCKET_TIMEOUT", "60"))
-        self.WEBSOCKET_MAX_CONNECTIONS: int = int(os.getenv("WEBSOCKET_MAX_CONNECTIONS", "1000"))
-        self.WEBSOCKET_HEARTBEAT_INTERVAL: int = int(os.getenv("WEBSOCKET_HEARTBEAT_INTERVAL", "30"))
-        self.WEBSOCKET_MAX_MESSAGE_SIZE: int = int(os.getenv("WEBSOCKET_MAX_MESSAGE_SIZE", str(1024 * 1024)))
+        # SSE stream settings
+        self.SSE_HEARTBEAT_INTERVAL_SECONDS: int = int(os.getenv("SSE_HEARTBEAT_INTERVAL_SECONDS", "15"))
+        self.SSE_RECONNECT_RETRY_MS: int = int(os.getenv("SSE_RECONNECT_RETRY_MS", "3000"))
+        self.SSE_MAX_CONNECTIONS_PER_USER: int = int(os.getenv("SSE_MAX_CONNECTIONS_PER_USER", "3"))
+        self.SSE_EVENT_RETENTION_SECONDS: int = int(os.getenv("SSE_EVENT_RETENTION_SECONDS", "300"))
 
         # -----------------------------------------------------------------------
         # AI / LLM Configuration (Unified Interface)

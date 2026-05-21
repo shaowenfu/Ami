@@ -8,30 +8,30 @@ nova-fastapi-starter/
 ├── main.py                # 生命周期、路由聚合、异常处理、静态挂载
 ├── core/                  # 配置、日志、通用异常、memory 脚手架
 ├── dependencies/          # 依赖提供者（config/auth/token/LLM/SMS/repo）
-├── routers/               # HTTP/WS 控制器（薄）
+├── routers/               # HTTP/SSE 控制器（薄）
 ├── services/              # 业务编排；基础在 services/basic
 ├── infrastructure/        # db 客户端、模型、仓库
-├── static/                # auth 指南、WS 调试、通知、导航
+├── static/                # auth 指南、通知、导航
 └── scripts/               # 可选脚本
 ```
 
 ## 2) 职责与边界
 | 模块 | 责任 | 要做 | 禁止 | 依赖 |
 | --- | --- | --- | --- | --- |
-| `main.py` | 生命周期、路由聚合、异常、静态 | 启停 DB/memory/WS；注册路由/异常 | 业务逻辑；临时创建客户端 | core, routers, infra/db, services/basic/websocket |
+| `main.py` | 生命周期、路由聚合、异常、静态 | 启停 DB/memory；注册路由/异常 | 业务逻辑；临时创建客户端 | core, routers, infra/db |
 | `core/` | 配置、日志、通用异常、memory 占位 | 校验配置，提供 logger | 业务/数据访问 | stdlib |
 | `dependencies/` | 依赖提供 | 提供 config、ModelService、auth/token/SMS、仓库 | 在路由里 new 服务/客户端 | core, services/basic, infra/repos |
-| `routers/` | HTTP/WS 控制器 | 校验、`Depends`、返回 DTO | 写业务、直连 DB/LLM | dependencies, services/basic, infra/models |
-| `services/basic/` | auth/llm/sms/websocket 编排 | 抛 `BaseAPIException` 派生类，协调 repo/LLM/memory | 用 `HTTPException`；new 客户端 | core, infra/repos, infra/db |
+| `routers/` | HTTP/SSE 控制器 | 校验、`Depends`、返回 DTO/流 | 写业务、直连 DB/LLM | dependencies, services/basic, infra/models |
+| `services/basic/` | auth/llm/sms 编排 | 抛 `BaseAPIException` 派生类，协调 repo/LLM/memory | 用 `HTTPException`；new 客户端 | core, infra/repos, infra/db |
 | `infra/db/` | 客户端单例 | `connect_*`/`close_*`/`get_*` | 执行查询 | core/config |
 | `infra/repos/` | CRUD 数据访问 | 返回 Pydantic 模型（`DB*`/`*Create`/`*Response`） | 业务逻辑、记录秘钥 | infra/db, infra/models |
 | `infra/models/` | 数据契约 | Pydantic 模型、序列化 | 跨层逻辑 | stdlib |
 | `static/` | 静态演示页 | 独立 HTML | 后端耦合 | 无 |
 
 ## 3) 启动与依赖
-- 启动：日志 → connect mongo/mysql/redis → init memory → init WebSocketService → 进入服务。
-- 关闭：清理 WebSocketService → 关闭 mongo/redis/mysql → 关闭 `ModelService`。
-- 单例：DB 客户端、`ModelService`、`WebSocketService` 只在 lifespan 初始化一次。
+- 启动：日志 → connect mongo/redis → init memory → 进入服务。
+- 关闭：关闭 mongo/redis → 关闭 `ModelService`。
+- 单例：DB 客户端、`ModelService` 通过依赖注入集中提供。
 - 依赖全部来自 `dependencies/providers.py`，禁止路由/服务内手动实例化。
 
 ## 4) 编码规范
@@ -41,15 +41,15 @@ nova-fastapi-starter/
 - 注释克制，只补充意图/边界。
 
 ## 5) 认证与安全
-- 仅 JWT：HTTP/WS 用户 ID 仅来自 token `sub`，禁止 header/query 透传。
-- WS token 通过首个 `Sec-WebSocket-Protocol` 传递并回显；HTTP 用 `Authorization: Bearer <token>` 或 `X-Auth-Token`。
+- 仅 JWT：用户 ID 仅来自 token `sub`，禁止 header/query 透传。
+- HTTP 与 SSE 鉴权统一使用 `Authorization: Bearer <token>` 或 `X-Auth-Token`。
 - 秘钥放 `.env`（源自 `.env.example`），绝不提交真实秘钥。
 
-## 6) WebSocket
-- 端点 `/ws/chat`；管理+handler 在 `services/basic/websocket.py`。
-- 内置 `ping/status/echo/llm_stream`；启动时可 `register_handler("type", handler)` 扩展。
-- `UnifiedWebSocketRequest`：必填 `type`，可选 `agent_id/message/payload/context`；大小/超时由 `core/config.py` 控制。
-- 错误早抛：非法/超限直接报错或关闭，可返回结构化 error payload，无兜底。
+## 6) SSE Streams
+- SSE 是唯一实时服务端推送通道；客户端写操作保持普通 HTTP 请求。
+- 流端点返回 `text/event-stream`，事件类型包括 `connected`、`heartbeat`、`message.delta`、`message.completed` 等。
+- SSE 心跳、重连和连接限制来自 `core/config.py`。
+- 错误早抛：鉴权失败或流初始化失败返回结构化错误，禁止静默降级为轮询。
 
 ## 7) LLM
 - OpenAI 兼容入口 `services/basic/llm.py`，由 `DEFAULT_MODEL_PROVIDER` + 通用 `LLM_` 配置驱动。
@@ -81,7 +81,7 @@ nova-fastapi-starter/
 - 遵循 PEP8，导入有序，移除未用依赖。
 
 ## 13) 提交与文档
-- 使用 Conventional Commits（如 `feat(auth): ...`，`fix(ws): ...`），小步提交。
+- 使用 Conventional Commits（如 `feat(auth): ...`，`feat(streams): ...`），小步提交。
 - 新增/删除模块需同步更新文档/静态页。
 - `.env`、真实秘钥一律不提交（`.env.*` 已忽略）。
-- 关键变更需在 `PROGRESS.md` / `PROGRESS_ZH.md` 记录（架构、配置/环境变量、API/WS 契约、基础设施/容器、重要文档）。
+- 关键变更需在 `PROGRESS.md` / `PROGRESS_ZH.md` 记录（架构、配置/环境变量、API/SSE 契约、基础设施/容器、重要文档）。

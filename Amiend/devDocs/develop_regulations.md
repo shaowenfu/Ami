@@ -8,30 +8,30 @@ nova-fastapi-starter/
 ├── main.py                # lifespan, routers, exceptions, static mount
 ├── core/                  # config, logger, exceptions, memory scaffold
 ├── dependencies/          # DI providers (config/auth/token/LLM/SMS/repos)
-├── routers/               # HTTP/WS controllers (thin)
+├── routers/               # HTTP/SSE controllers (thin)
 ├── services/              # business orchestration; baselines in services/basic
 ├── infrastructure/        # db clients (mongo/redis/mysql), models, repositories
-├── static/                # auth guide, WS tester, notifications, index
+├── static/                # auth guide, notifications, index
 └── scripts/               # optional utilities
 ```
 
 ## 2) Responsibilities & Boundaries
 | Module | Responsibility | Do | Don’t | Depends |
 | --- | --- | --- | --- | --- |
-| `main.py` | Lifespan, router aggregation, exception wiring, static mount | Init/close DBs, memory, WS once | Business logic, ad-hoc clients | core, routers, infra/db, services/basic/websocket |
+| `main.py` | Lifespan, router aggregation, exception wiring, static mount | Init/close DBs, memory, shared services once | Business logic, ad-hoc clients | core, routers, infra/db |
 | `core/` | Settings, logger, shared exceptions, memory scaffold | Validate config, provide loggers | Business/data access | stdlib |
 | `dependencies/` | DI providers | Expose config, ModelService, auth/token/SMS/repos | Instantiate in routers | core, services/basic, infra/repos |
-| `routers/` | HTTP/WS controllers | Validate, `Depends`, DTO responses | Business rules, DB/LLM calls | dependencies, services/basic, infra/models |
-| `services/basic/` | Auth/LLM/SMS/WS orchestration | Raise `BaseAPIException` subclasses, coordinate repos/LLM/memory | Use `HTTPException`; new clients | core, infra/repos, infra/db |
+| `routers/` | HTTP/SSE controllers | Validate, `Depends`, DTO responses/streams | Business rules, DB/LLM calls | dependencies, services/basic, infra/models |
+| `services/basic/` | Auth/LLM/SMS orchestration | Raise `BaseAPIException` subclasses, coordinate repos/LLM/memory | Use `HTTPException`; new clients | core, infra/repos, infra/db |
 | `infra/db/` | Client singletons | `connect_*`, `close_*`, `get_*` | Run queries | core/config |
 | `infra/repos/` | CRUD-only data access | Return Pydantic models (`DB*`, `*Create`, `*Response`) | Business logic, secrets logging | infra/db, infra/models |
 | `infra/models/` | Data contracts | Pydantic models, serialization helpers | Cross-layer logic | stdlib |
 | `static/` | Demo pages | Standalone HTML | Backend coupling | none |
 
 ## 3) Lifespan & DI
-- Startup: setup logger → connect mongo/mysql/redis → init memory adapter → init WebSocketService → serve.
-- Shutdown: cleanup WebSocketService → close mongo/redis/mysql → close `ModelService`.
-- Singletons: DB clients, `ModelService`, `WebSocketService` created once in lifespan.
+- Startup: setup logger → connect mongo/redis → init memory adapter → serve.
+- Shutdown: close mongo/redis → close `ModelService`.
+- Singletons: DB clients and `ModelService` are created once and provided through DI.
 - All deps from `dependencies/providers.py`; never `new` in routers/services.
 
 ## 4) Coding Standards
@@ -42,14 +42,14 @@ nova-fastapi-starter/
 
 ## 5) Auth & Security
 - JWT-only; user id from token `sub` only. No header/query user ids.
-- WS token via first `Sec-WebSocket-Protocol` (echoed); HTTP via `Authorization: Bearer <token>` or `X-Auth-Token`.
+- HTTP and SSE auth use `Authorization: Bearer <token>` or `X-Auth-Token`.
 - Secrets live in `.env` (copy from `.env.example`); never commit real keys.
 
-## 6) WebSocket
-- Endpoint `/ws/chat`; manager + handlers in `services/basic/websocket.py`.
-- Built-ins: `ping`, `status`, `echo`, `llm_stream`; extend at startup via `register_handler("type", handler)`.
-- Request `UnifiedWebSocketRequest`: required `type`; optional `agent_id/message/payload/context`; limits from `core/config.py`.
-- Fail fast: invalid/oversized → error/close; structured error payloads OK, no hidden downgrades.
+## 6) SSE Streams
+- SSE is the only real-time server push channel. Client writes stay as normal HTTP requests.
+- Stream endpoints return `text/event-stream` and emit typed events such as `connected`, `heartbeat`, `message.delta`, and `message.completed`.
+- SSE limits and retry/heartbeat settings come from `core/config.py`.
+- Fail fast: invalid auth or stream setup errors return structured API errors; do not silently downgrade to polling.
 
 ## 7) LLM
 - OpenAI-compatible wrapper in `services/basic/llm.py`; driven by `DEFAULT_MODEL_PROVIDER` + generic `LLM_` config.
@@ -81,7 +81,7 @@ nova-fastapi-starter/
 - Follow PEP8; tidy imports; drop unused deps.
 
 ## 13) Git & Docs
-- Conventional commits (`feat(auth): ...`, `fix(ws): ...`); small scoped changes.
+- Conventional commits (`feat(auth): ...`, `feat(streams): ...`); small scoped changes.
 - Update docs/static when adding/removing modules.
 - `.env` and secrets are never committed (`.env.*` ignored).
-- Record impactful changes in `PROGRESS.md` / `PROGRESS_ZH.md` (architecture, config/env schema, API/WS contracts, infra/docker, key docs).
+- Record impactful changes in `PROGRESS.md` / `PROGRESS_ZH.md` (architecture, config/env schema, API/SSE contracts, infra/docker, key docs).

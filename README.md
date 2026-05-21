@@ -17,12 +17,12 @@
 │  expo-router · NativeWind       │
 │  Zustand · AsyncStorage         │
 └──────────────┬──────────────────┘
-               │ HTTP / WebSocket
+               │ HTTP / SSE
 ┌──────────────▼──────────────────┐
 │           Amiend                │
 │       FastAPI (后端服务)          │
 │  JWT Auth · LLM Gateway         │
-│  WebSocket · SMS · Memory       │
+│  SSE Streams · SMS · Memory     │
 └──────────────┬──────────┬────────┘
                │          │
       ┌────────▼───┐ ┌────▼┐
@@ -31,7 +31,7 @@
 ```
 
 - **Amiapp**（`Amiapp/`）：React Native + Expo 移动端前端，负责 UI 渲染、本地状态管理和用户交互。
-- **Amiend**（`Amiend/`）：FastAPI 后端服务，负责认证鉴权、LLM 对话流、WebSocket 实时通信和数据持久化。
+- **Amiend**（`Amiend/`）：FastAPI 后端服务，负责认证鉴权、LLM 对话流、SSE 实时推送和数据持久化。
 
 ## 技术栈
 
@@ -52,7 +52,7 @@
 | Web 框架 | FastAPI 0.121 | 异步 Python Web 框架 |
 | 鉴权 | JWT（双 Token） + bcrypt | Access 15min / Refresh 7d |
 | LLM 集成 | OpenAI SDK 兼容层 | 一行环境变量切换 Provider |
-| 实时通信 | WebSocket | JWT 鉴权，可扩展消息路由 |
+| 实时通信 | Server-Sent Events (SSE) | 服务端到客户端的统一实时推送与流式输出 |
 | 数据库 | MongoDB Atlas + Motor (async) | 用户、chat、agent 等业务数据 |
 | 缓存 | Redis 7 | Token 管理、验证码、频率限制 |
 | 向量记忆 | Mem0 + ChromaDB（可选） | 默认关闭，env 开启 |
@@ -75,12 +75,12 @@ Ami/
 │   ├── utils/              #   工具函数
 │   └── assets/             #   静态资源
 ├── Amiend/                 # 后端 — FastAPI 服务
-│   ├── routers/            #   API 路由层（auth / health / websocket）
-│   ├── services/           #   业务逻辑层（auth / llm / sms / websocket）
+│   ├── routers/            #   API 路由层（auth / health / SSE streams）
+│   ├── services/           #   业务逻辑层（auth / llm / sms / streams）
 │   ├── infrastructure/     #   基础设施层（db / models / repositories）
 │   ├── dependencies/       #   FastAPI 依赖注入（providers + auth）
 │   ├── core/               #   核心模块（config / exceptions / logger / memory）
-│   ├── static/             #   静态测试页面（WebSocket 测试等）
+│   ├── static/             #   静态演示页面
 │   ├── devDocs/            #   开发文档
 │   ├── main.py             #   应用入口
 │   ├── Dockerfile          #   容器构建文件

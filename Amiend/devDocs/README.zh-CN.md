@@ -2,7 +2,7 @@
 
 > **为 AI 应用打造的“快启快飞”后端骨架**
 >
-> A "Quick-Start" Backend Skeleton for AI Applications: JWT, WebSocket, Pluggable LLM, Optional Memory, and One-Click Dockerization.
+> A "Quick-Start" Backend Skeleton for AI Applications: JWT, SSE Streams, Pluggable LLM, Optional Memory, and One-Click Dockerization.
 
 <p align="left">
   <a href="../README.md">🇺🇸 English</a> | 
@@ -18,7 +18,7 @@
 我们致力于为 AI 初创公司和个人开发者提供一套**简洁、高效、生产级**的后端基础设施。
 
 - **🚀 快启快飞 (Ready to Launch)**: 拒绝繁琐的配置，从零到 API 上线只需几分钟。
-- **🧩 模块化 (Pluggable)**: JWT 鉴权、WS 流式通信、LLM 适配器、向量记忆——需要什么，开启什么。
+- **🧩 模块化 (Pluggable)**: JWT 鉴权、SSE 流式通信、LLM 适配器、向量记忆——需要什么，开启什么。
 - **🛡️ 第一性原理 (First Principles)**: 坚持奥卡姆剃刀原则。分层清晰，默认最小化运行，错误早抛（Fail Fast），兼顾安全与可维护性。
 - **🤝 社区共建 (Community)**: 这是一个开放的骨架，欢迎共建更多 Vector/LLM 适配器和实战示例。
 
@@ -31,7 +31,7 @@
 - **Production Architecture**: 
   - **DDD-Lite**: 清晰的 `Router` -> `Service` -> `Repository` 分层。
   - **Async First**: 全链路异步数据库支持 (Mongo + MySQL + Redis)。
-  - **Security**: 内置 JWT (Access/Refresh Token) 与 WebSocket 鉴权机制。
+  - **Security**: 内置 JWT (Access/Refresh Token)，HTTP 与 SSE 共享同一套鉴权入口。
 - **DevOps Ready**: 包含 `Dockerfile` 与模块化 `docker-compose` 配置。
 
 ---
@@ -100,7 +100,7 @@ LLM_MODEL=llama3
 ├── infrastructure/     # 基础设施层 (DB Clients, Repositories)
 ├── routers/            # 路由层 (API 接口定义)
 ├── services/           # 业务逻辑层 (Auth, LLM, Chat, SMS)
-└── static/             # 简单的测试页面 (WebSocket Tester 等)
+└── static/             # 简单的测试页面与通知演示
 ```
 
 ## 🐛 调试指南 (VS Code)

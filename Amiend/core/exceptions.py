@@ -95,29 +95,48 @@ class SmsSendFailedError(BaseAPIException):
     message = "Failed to send SMS."
 
 
-# WebSocket errors
-class WebSocketAuthenticationError(BaseAPIException):
+# Domain errors
+class ResourceNotFoundError(BaseAPIException):
+    status_code = 404
+    code = "RESOURCE_NOT_FOUND"
+    message = "Resource not found."
+
+
+class PermissionDeniedError(BaseAPIException):
+    status_code = 403
+    code = "PERMISSION_DENIED"
+    message = "Permission denied."
+
+
+class ConflictError(BaseAPIException):
+    status_code = 409
+    code = "CONFLICT"
+    message = "Resource conflict."
+
+
+# SSE / stream errors
+class StreamAuthenticationError(BaseAPIException):
     status_code = 401
-    code = "WEBSOCKET_AUTH_ERROR"
-    message = "WebSocket authentication failed."
+    code = "STREAM_AUTH_ERROR"
+    message = "Stream authentication failed."
 
 
-class WebSocketConnectionError(BaseAPIException):
+class StreamConnectionError(BaseAPIException):
     status_code = 400
-    code = "WEBSOCKET_CONNECTION_ERROR"
-    message = "WebSocket connection error."
+    code = "STREAM_CONNECTION_ERROR"
+    message = "Stream connection error."
 
 
-class WebSocketMessageError(BaseAPIException):
+class StreamEventError(BaseAPIException):
     status_code = 400
-    code = "WEBSOCKET_MESSAGE_ERROR"
-    message = "WebSocket message error."
+    code = "STREAM_EVENT_ERROR"
+    message = "Stream event error."
 
 
-class WebSocketTimeoutError(BaseAPIException):
+class StreamTimeoutError(BaseAPIException):
     status_code = 408
-    code = "WEBSOCKET_TIMEOUT_ERROR"
-    message = "WebSocket timeout."
+    code = "STREAM_TIMEOUT_ERROR"
+    message = "Stream timeout."
 
 
 # FastAPI handlers
@@ -157,10 +176,13 @@ __all__ = [
     "TooManyRequestsError",
     "InvalidVerificationCodeError",
     "SmsSendFailedError",
-    "WebSocketAuthenticationError",
-    "WebSocketConnectionError",
-    "WebSocketMessageError",
-    "WebSocketTimeoutError",
+    "ResourceNotFoundError",
+    "PermissionDeniedError",
+    "ConflictError",
+    "StreamAuthenticationError",
+    "StreamConnectionError",
+    "StreamEventError",
+    "StreamTimeoutError",
     "unified_api_exception_handler",
     "generic_exception_handler",
 ]
