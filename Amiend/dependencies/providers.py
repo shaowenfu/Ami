@@ -9,9 +9,14 @@ from core.logger import get_logger
 from dependencies.auth import get_current_user_id
 from infrastructure.db.mongo_client import get_database
 from infrastructure.db.redis_client import get_redis_client
+from infrastructure.repositories.message_repository import MessageRepository
+from infrastructure.repositories.space_repository import SpaceRepository
 from infrastructure.repositories.user_repository import UserRepository
 from services.basic.auth import AuthService, TokenService
 from services.basic.llm import ModelService
+from services.basic.message import MessageService
+from services.basic.sse import SseEventBus
+from services.basic.space import SpaceService
 from services.basic.sms import SmsService
 
 logger = get_logger(__name__)
@@ -28,6 +33,7 @@ def get_config():
 
 
 _model_service: Optional[ModelService] = None
+_sse_event_bus: Optional[SseEventBus] = None
 
 
 def get_model_service(config=None) -> ModelService:
@@ -50,6 +56,18 @@ async def close_model_service() -> None:
         _model_service = None
 
 
+def get_sse_event_bus() -> SseEventBus:
+    """Provide the in-process SSE event bus singleton."""
+
+    global _sse_event_bus
+    if _sse_event_bus is None:
+        _sse_event_bus = SseEventBus(
+            max_connections_per_user=settings.SSE_MAX_CONNECTIONS_PER_USER,
+            reconnect_retry_ms=settings.SSE_RECONNECT_RETRY_MS,
+        )
+    return _sse_event_bus
+
+
 # -----------------------------------------------------------------
 # Repository providers
 # -----------------------------------------------------------------
@@ -58,6 +76,18 @@ async def get_user_repository() -> UserRepository:
     """Provide UserRepository bound to the default MongoDB database."""
 
     return UserRepository(get_database())
+
+
+async def get_space_repository() -> SpaceRepository:
+    """Provide SpaceRepository bound to the default MongoDB database."""
+
+    return SpaceRepository(get_database())
+
+
+async def get_message_repository() -> MessageRepository:
+    """Provide MessageRepository bound to the default MongoDB database."""
+
+    return MessageRepository(get_database())
 
 
 # -----------------------------------------------------------------
@@ -111,13 +141,45 @@ def get_auth_service(
     )
 
 
+def get_space_service(
+    space_repository: Annotated[SpaceRepository, Depends(get_space_repository)],
+    user_repository: Annotated[UserRepository, Depends(get_user_repository)],
+) -> SpaceService:
+    """Provide relationship space workflows."""
+
+    return SpaceService(
+        space_repository=space_repository,
+        user_repository=user_repository,
+    )
+
+
+def get_message_service(
+    message_repository: Annotated[MessageRepository, Depends(get_message_repository)],
+    space_repository: Annotated[SpaceRepository, Depends(get_space_repository)],
+    event_bus: Annotated[SseEventBus, Depends(get_sse_event_bus)],
+) -> MessageService:
+    """Provide space message workflows."""
+
+    return MessageService(
+        message_repository=message_repository,
+        space_repository=space_repository,
+        event_bus=event_bus,
+        model_service_factory=lambda: get_model_service(get_config()),
+    )
+
+
 # -----------------------------------------------------------------
 # Type aliases for FastAPI Depends
 # -----------------------------------------------------------------
 
 UserRepositoryDep = Annotated[UserRepository, Depends(get_user_repository)]
+SpaceRepositoryDep = Annotated[SpaceRepository, Depends(get_space_repository)]
+MessageRepositoryDep = Annotated[MessageRepository, Depends(get_message_repository)]
 TokenServiceDep = Annotated[TokenService, Depends(get_token_service)]
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
+SpaceServiceDep = Annotated[SpaceService, Depends(get_space_service)]
+MessageServiceDep = Annotated[MessageService, Depends(get_message_service)]
+SseEventBusDep = Annotated[SseEventBus, Depends(get_sse_event_bus)]
 SmsServiceDep = Annotated[SmsService | _ConsoleSmsService, Depends(get_sms_service)]
 ModelServiceDep = Annotated[ModelService, Depends(get_model_service)]
 CurrentUserIdDep = Annotated[str, Depends(get_current_user_id)]

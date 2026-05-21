@@ -15,6 +15,8 @@ from core.config import settings
 from core.logger import setup_logging
 from routers import auth as auth_router  # Auth 路由
 from routers import health as health_router  # Health 路由
+from routers import messages as messages_router  # Message/SSE 路由
+from routers import spaces as spaces_router  # Space 路由
 
 from core.memory_adapter import init_memory_adapter
 from dependencies.providers import close_model_service
@@ -70,7 +72,7 @@ app = FastAPI(
     description="""
 Minimal FastAPI starter with JWT Auth + SSE stream.
 
-- HTTP: /auth/*, /health
+- HTTP: /auth/*, /health, /spaces/*
 - Stream: Server-Sent Events (SSE) exclusively for real-time
 - Static: /static/index.html for samples
 """,
@@ -109,6 +111,8 @@ app.exception_handler(Exception)(generic_exception_handler)
 # 注册 Auth、Health 路由
 app.include_router(auth_router.router)
 app.include_router(health_router.router)
+app.include_router(spaces_router.router)
+app.include_router(messages_router.router)
 
 # 配置静态文件服务 - 使用专门的静态目录
 app.mount("/static", StaticFiles(directory="static"), name="static")
