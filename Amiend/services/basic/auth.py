@@ -28,6 +28,10 @@ from core.exceptions import (
 from infrastructure.models.user import (
     AccountDeleteRequest,
     DBUser,
+    EmailScene,
+    EmailSendRequest,
+    EmailVerificationResponse,
+    EmailVerifyRequest,
     LogoutRequest,
     PasswordLoginRequest,
     RefreshTokenRequest,
@@ -41,6 +45,7 @@ from infrastructure.models.user import (
 )
 from infrastructure.repositories.user_repository import UserRepository
 from typing import Optional
+from services.basic.email import EmailService
 from services.basic.sms import SmsService
 
 
@@ -176,50 +181,59 @@ class AuthService:
         token_service: TokenService,
         redis_client: Redis,
         sms_service: SmsService,
+        email_service: EmailService,
     ) -> None:
         self._user_repository = user_repository
         self._token_service = token_service
         self._redis = redis_client
         self._sms_service = sms_service
+        self._email_service = email_service
         self._sms_code_length = settings.SMS_CODE_LENGTH
         self._sms_code_ttl = settings.SMS_CODE_TTL_SECONDS
         self._sms_ticket_ttl = settings.SMS_TICKET_TTL_SECONDS
         self._sms_resend_cooldown = settings.SMS_RESEND_COOLDOWN_SECONDS
         self._sms_max_attempts = settings.SMS_MAX_ATTEMPTS
         self._sms_daily_limit = settings.SMS_DAILY_LIMIT_PER_PHONE
+        self._email_fixed_code = settings.EMAIL_DEV_FIXED_CODE
 
     # ------------------------------------------------------------------
     # Registration
     # ------------------------------------------------------------------
     async def register(self, payload: RegisterRequest) -> TokenPair:
-        """Register a new user after verifying phone ownership."""
+        """Register a new user after verifying email ownership."""
 
-        phone_user = await self._ensure_phone_available(payload.phone)
-        allowed_user_id = phone_user.id if phone_user and not phone_user.is_active else None
+        email_user = await self._ensure_email_available(payload.email)
+        allowed_user_id = email_user.id if email_user and not email_user.is_active else None
         await self._ensure_username_available(payload.username, allowed_user_id=allowed_user_id)
+        if payload.phone:
+            await self._ensure_phone_available(payload.phone, allowed_user_id=allowed_user_id)
         self._assert_password_complexity(payload.password)
-        await self._consume_ticket(SmsScene.REGISTER, payload.phone, payload.verification_ticket)
+        await self._consume_email_ticket(EmailScene.REGISTER, payload.email, payload.verification_ticket)
 
         password_hash = self._hash_password(payload.password)
-        if phone_user and not phone_user.is_active:
+        if email_user and not email_user.is_active:
             reactivated = await self._user_repository.reactivate_user(
-                user_id=phone_user.id,
+                user_id=email_user.id,
                 username=payload.username,
+                email=payload.email,
+                phone=payload.phone,
                 password_hash=password_hash,
-                phone_verified_at=datetime.now(timezone.utc),
+                email_verified_at=datetime.now(timezone.utc),
+                phone_verified_at=None,
             )
             if reactivated is None:
-                raise UserAlreadyExistsError(detail="用户名或手机号已存在。")
+                raise UserAlreadyExistsError(detail="用户名、邮箱或手机号已存在。")
             return await self._issue_token_pair(reactivated.id)
 
         created = await self._user_repository.create_user(
             username=payload.username,
+            email=payload.email,
             phone=payload.phone,
             password_hash=password_hash,
-            phone_verified_at=datetime.now(timezone.utc),
+            email_verified_at=datetime.now(timezone.utc),
         )
         if created is None:
-            raise UserAlreadyExistsError(detail="用户名或手机号已存在。")
+            raise UserAlreadyExistsError(detail="用户名、邮箱或手机号已存在。")
 
         return await self._issue_token_pair(created.id)
 
@@ -238,6 +252,47 @@ class AuthService:
             raise InactiveUserError()
 
         return await self._issue_token_pair(user.id)
+
+    async def verify_email_code(self, payload: EmailVerifyRequest) -> EmailVerificationResponse:
+        """Verify email code for a scene and produce token pair or ticket."""
+
+        email = payload.email
+        code_key = self._email_code_key(payload.scene, email)
+        record = await self._load_code_record(code_key)
+        if record is None:
+            raise InvalidVerificationCodeError()
+
+        if payload.code.strip() != record["code"]:
+            await self._handle_invalid_code_attempt(code_key, record)
+            raise InvalidVerificationCodeError()
+
+        await self._redis.delete(code_key)
+
+        if payload.scene == EmailScene.LOGIN:
+            user = await self._user_repository.get_by_email(email)
+            if user is None:
+                raise InvalidCredentialsError(message="邮箱未注册。")
+            if not user.is_active:
+                raise InactiveUserError()
+            token_pair = await self._issue_token_pair(user.id)
+            return EmailVerificationResponse(outcome="login", token_pair=token_pair)
+        elif payload.scene == EmailScene.REGISTER:
+            await self._ensure_email_available(email)
+        else:
+            user = await self._user_repository.get_by_email(email)
+            if user is None:
+                raise InvalidCredentialsError(message="邮箱未注册。")
+            if not user.is_active:
+                raise InactiveUserError()
+
+        ticket = self._issue_ticket()
+        await self._store_email_ticket(payload.scene, email, ticket)
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=self._sms_ticket_ttl)
+        return EmailVerificationResponse(
+            outcome="ticket",
+            verification_ticket=ticket,
+            ticket_expires_at=expires_at,
+        )
 
     async def verify_sms_code(self, payload: SmsVerifyRequest) -> SmsVerificationResponse:
         """Verify SMS code for a scene and produce token pair or ticket."""
@@ -281,8 +336,40 @@ class AuthService:
         )
 
     # ------------------------------------------------------------------
-    # SMS send
+    # Verification code send
     # ------------------------------------------------------------------
+    async def send_email_code(self, payload: EmailSendRequest) -> None:
+        """Send email code for the given scene."""
+
+        email = payload.email
+        if payload.scene == EmailScene.REGISTER:
+            await self._ensure_email_available(email)
+        else:
+            user = await self._user_repository.get_by_email(email)
+            if user is None:
+                raise InvalidCredentialsError(message="邮箱未注册。")
+            if not user.is_active:
+                raise InactiveUserError()
+
+        await self._enforce_email_limits(payload.scene, email)
+
+        code = self._generate_email_verification_code()
+        code_key = self._email_code_key(payload.scene, email)
+        await self._redis.set(code_key, json.dumps({"code": code, "attempts": 0}), ex=self._sms_code_ttl)
+
+        try:
+            await self._email_service.send_verification_code(
+                email=email,
+                code=code,
+                scene=payload.scene.value,
+            )
+        except Exception:
+            await self._redis.delete(code_key)
+            raise
+
+        await self._redis.set(self._email_cooldown_key(payload.scene, email), "1", ex=self._sms_resend_cooldown)
+        await self._increment_email_daily_count(payload.scene, email)
+
     async def send_sms_code(self, payload: SmsSendRequest) -> None:
         """Send SMS code for the given scene."""
 
@@ -367,7 +454,7 @@ class AuthService:
         else:
             if payload.verification_ticket is None:
                 raise InvalidVerificationCodeError()
-            await self._consume_ticket(SmsScene.ACCOUNT_DELETE, user.phone, payload.verification_ticket)
+            await self._consume_account_delete_ticket(user, payload.verification_ticket)
 
         await self._user_repository.set_active(user.id, False)
         await self._revoke_all_refresh_tokens(user.id)
@@ -415,6 +502,11 @@ class AuthService:
         value = secrets.randbelow(10**self._sms_code_length)
         return str(value).zfill(self._sms_code_length)
 
+    def _generate_email_verification_code(self) -> str:
+        if self._email_fixed_code:
+            return self._email_fixed_code.strip()
+        return self._generate_verification_code()
+
     def _sms_code_key(self, scene: SmsScene, phone: str) -> str:
         return f"auth:sms:code:{scene.value}:{phone}"
 
@@ -424,6 +516,16 @@ class AuthService:
     def _sms_daily_key(self, scene: SmsScene, phone: str) -> str:
         today = datetime.now(timezone.utc).strftime("%Y%m%d")
         return f"auth:sms:daily:{scene.value}:{phone}:{today}"
+
+    def _email_code_key(self, scene: EmailScene, email: str) -> str:
+        return f"auth:email:code:{scene.value}:{email}"
+
+    def _email_cooldown_key(self, scene: EmailScene, email: str) -> str:
+        return f"auth:email:cooldown:{scene.value}:{email}"
+
+    def _email_daily_key(self, scene: EmailScene, email: str) -> str:
+        today = datetime.now(timezone.utc).strftime("%Y%m%d")
+        return f"auth:email:daily:{scene.value}:{email}:{today}"
 
     @staticmethod
     def _seconds_until_end_of_day() -> int:
@@ -469,6 +571,22 @@ class AuthService:
         if count == 1:
             await self._redis.expire(daily_key, self._seconds_until_end_of_day())
 
+    async def _enforce_email_limits(self, scene: EmailScene, email: str) -> None:
+        cooldown_exists = await self._redis.exists(self._email_cooldown_key(scene, email))
+        if cooldown_exists:
+            raise TooManyRequestsError(detail="请求过于频繁，请稍后再试。")
+
+        daily_key = self._email_daily_key(scene, email)
+        daily_count_raw = await self._redis.get(daily_key)
+        if daily_count_raw is not None and int(daily_count_raw) >= self._sms_daily_limit:
+            raise TooManyRequestsError(detail="当日验证码请求次数已达上限。")
+
+    async def _increment_email_daily_count(self, scene: EmailScene, email: str) -> None:
+        daily_key = self._email_daily_key(scene, email)
+        count = await self._redis.incr(daily_key)
+        if count == 1:
+            await self._redis.expire(daily_key, self._seconds_until_end_of_day())
+
     def _issue_ticket(self) -> str:
         return secrets.token_urlsafe(16)
 
@@ -485,13 +603,48 @@ class AuthService:
     def _sms_ticket_key(self, scene: SmsScene, phone: str, ticket: str) -> str:
         return f"auth:sms:ticket:{scene.value}:{phone}:{ticket}"
 
-    async def _ensure_phone_available(self, phone: str) -> Optional[DBUser]:
+    async def _store_email_ticket(self, scene: EmailScene, email: str, ticket: str) -> None:
+        key = self._email_ticket_key(scene, email, ticket)
+        await self._redis.set(key, "1", ex=self._sms_ticket_ttl)
+
+    async def _consume_email_ticket(self, scene: EmailScene, email: str, ticket: str) -> None:
+        key = self._email_ticket_key(scene, email, ticket)
+        removed = await self._redis.delete(key)
+        if removed == 0:
+            raise InvalidVerificationCodeError(message="验证码凭证无效或已过期。")
+
+    def _email_ticket_key(self, scene: EmailScene, email: str, ticket: str) -> str:
+        return f"auth:email:ticket:{scene.value}:{email}:{ticket}"
+
+    async def _consume_account_delete_ticket(self, user: DBUser, ticket: str) -> None:
+        email_key = self._email_ticket_key(EmailScene.ACCOUNT_DELETE, user.email, ticket)
+        removed = await self._redis.delete(email_key)
+        if removed:
+            return
+        if user.phone:
+            sms_key = self._sms_ticket_key(SmsScene.ACCOUNT_DELETE, user.phone, ticket)
+            removed = await self._redis.delete(sms_key)
+            if removed:
+                return
+        raise InvalidVerificationCodeError(message="验证码凭证无效或已过期。")
+
+    async def _ensure_email_available(self, email: str) -> Optional[DBUser]:
+        """
+        Ensure the email is not bound to an active account.
+        Returns the existing user (may be inactive) for reuse.
+        """
+        existing_email = await self._user_repository.get_by_email(email)
+        if existing_email is not None and existing_email.is_active:
+            raise UserAlreadyExistsError(detail="邮箱已被注册。")
+        return existing_email
+
+    async def _ensure_phone_available(self, phone: str, allowed_user_id: Optional[str] = None) -> Optional[DBUser]:
         """
         Ensure the phone is not bound to an active account.
         Returns the existing user (may be inactive) for reuse.
         """
         existing_phone = await self._user_repository.get_by_phone(phone)
-        if existing_phone is not None and existing_phone.is_active:
+        if existing_phone is not None and existing_phone.id != allowed_user_id and existing_phone.is_active:
             raise UserAlreadyExistsError(detail="手机号已被注册。")
         return existing_phone
 

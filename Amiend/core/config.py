@@ -11,6 +11,7 @@ Environment variables (examples):
 - MEMORY_* (see core.memory_adapter.config)
 - LLM_* (provider-specific fields are intentionally placeholders; implement your own mapping in services/basic/llm.py)
 - SMS_* (optional; see services/basic/sms.py for expected fields)
+- SMTP_* / EMAIL_* (optional; see services/basic/email.py for expected fields)
 """
 from __future__ import annotations
 
@@ -102,6 +103,17 @@ class Settings:
         self.SMS_MAX_ATTEMPTS: int = int(os.getenv("SMS_MAX_ATTEMPTS", "5"))
         self.SMS_DAILY_LIMIT_PER_PHONE: int = int(os.getenv("SMS_DAILY_LIMIT_PER_PHONE", "20"))
         self.SMS_TICKET_TTL_SECONDS: int = int(os.getenv("SMS_TICKET_TTL_SECONDS", "600"))
+
+        # -----------------------------------------------------------------------
+        # Email verification
+        # -----------------------------------------------------------------------
+        self.SMTP_HOST: Optional[str] = os.getenv("SMTP_HOST")
+        self.SMTP_PORT: int = int(os.getenv("SMTP_PORT", "587"))
+        self.SMTP_USERNAME: Optional[str] = os.getenv("SMTP_USERNAME")
+        self.SMTP_PASSWORD: Optional[str] = os.getenv("SMTP_PASSWORD")
+        self.SMTP_FROM: Optional[str] = os.getenv("SMTP_FROM")
+        self.SMTP_USE_TLS: bool = os.getenv("SMTP_USE_TLS", "true").lower() == "true"
+        self.EMAIL_DEV_FIXED_CODE: Optional[str] = os.getenv("EMAIL_DEV_FIXED_CODE")
 
     @staticmethod
     def _load_static_tokens(raw: str) -> dict[str, str]:

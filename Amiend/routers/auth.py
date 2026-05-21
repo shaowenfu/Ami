@@ -7,6 +7,9 @@ from fastapi import APIRouter, Response, status
 from dependencies.providers import AuthServiceDep, CurrentUserIdDep
 from infrastructure.models.user import (
     AccountDeleteRequest,
+    EmailSendRequest,
+    EmailVerificationResponse,
+    EmailVerifyRequest,
     LogoutRequest,
     PasswordLoginRequest,
     RefreshTokenRequest,
@@ -26,14 +29,14 @@ router = APIRouter(prefix="/auth", tags=["auth"])
     "/register",
     response_model=TokenPair,
     status_code=status.HTTP_201_CREATED,
-    summary="注册并返回令牌（需手机号+验证码凭证）",
-    description="注册流程：先发送并验证短信获取verification_ticket，再携带手机号、用户名、密码和ticket完成注册，直接返回access/refresh token。",
+    summary="注册并返回令牌（需邮箱+验证码凭证）",
+    description="注册流程：先发送并验证邮箱获取verification_ticket，再携带邮箱、用户名、密码和ticket完成注册，直接返回access/refresh token。",
 )
 async def register_user(
     payload: RegisterRequest,
     auth_service: AuthServiceDep,
 ) -> TokenPair:
-    """Register a new user with verified phone."""
+    """Register a new user with verified email."""
 
     return await auth_service.register(payload)
 
@@ -51,6 +54,37 @@ async def login_user(
     """Authenticate user credentials and issue token pair."""
 
     return await auth_service.login_with_password(payload)
+
+
+@router.post(
+    "/email/send",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="发送邮箱验证码",
+    description="根据scene（register/login/account_delete）向指定邮箱发送验证码，支持频率限制。",
+)
+async def send_email_code(
+    payload: EmailSendRequest,
+    auth_service: AuthServiceDep,
+) -> Response:
+    """Send an email verification code for the requested scene."""
+
+    await auth_service.send_email_code(payload)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/email/verify",
+    response_model=EmailVerificationResponse,
+    summary="验证邮箱验证码",
+    description="校验验证码：scene=login 时直接返回 TokenPair，scene=register/account_delete 返回一次性 verification_ticket。",
+)
+async def verify_email_code(
+    payload: EmailVerifyRequest,
+    auth_service: AuthServiceDep,
+) -> EmailVerificationResponse:
+    """Verify email code and issue token pair or ticket."""
+
+    return await auth_service.verify_email_code(payload)
 
 
 @router.post(

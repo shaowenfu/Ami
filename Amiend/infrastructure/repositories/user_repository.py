@@ -23,8 +23,13 @@ class UserRepository:
     async def _ensure_indexes(self) -> None:
         if self._indexes_ready:
             return
-        await self._collection.create_index([("username", ASCENDING)], unique=True)
-        await self._collection.create_index([("phone", ASCENDING)], unique=True)
+        await self._collection.create_index([("username", ASCENDING)], unique=True, sparse=True)
+        await self._collection.create_index([("email", ASCENDING)], unique=True, sparse=True)
+        await self._collection.create_index(
+            [("phone", ASCENDING)],
+            unique=True,
+            sparse=True,
+        )
         self._indexes_ready = True
 
     async def get_by_id(self, user_id: str) -> Optional[DBUser]:
@@ -35,22 +40,36 @@ class UserRepository:
         await self._ensure_indexes()
         return self._to_user(await self._collection.find_one({"username": username}))
 
+    async def get_by_email(self, email: str) -> Optional[DBUser]:
+        await self._ensure_indexes()
+        return self._to_user(await self._collection.find_one({"email": email.lower()}))
+
     async def get_by_phone(self, phone: str) -> Optional[DBUser]:
         await self._ensure_indexes()
         return self._to_user(await self._collection.find_one({"phone": phone}))
 
     async def get_by_identifier(self, identifier: str) -> Optional[DBUser]:
         await self._ensure_indexes()
+        normalized = identifier.strip()
+        normalized_email = normalized.lower()
         document = await self._collection.find_one(
-            {"$or": [{"username": identifier}, {"phone": identifier}]}
+            {
+                "$or": [
+                    {"username": normalized},
+                    {"email": normalized_email},
+                    {"phone": normalized},
+                ]
+            }
         )
         return self._to_user(document)
 
     async def create_user(
         self,
         username: str,
-        phone: str,
+        email: str,
+        phone: Optional[str],
         password_hash: str,
+        email_verified_at=None,
         phone_verified_at=None,
         user_id: Optional[str] = None,
     ) -> Optional[DBUser]:
@@ -59,13 +78,16 @@ class UserRepository:
         document = {
             "id": user_id or str(uuid4()),
             "username": username,
-            "phone": phone,
+            "email": email.lower(),
             "password_hash": password_hash,
             "is_active": True,
+            "email_verified_at": email_verified_at,
             "phone_verified_at": phone_verified_at,
             "created_at": now,
             "updated_at": now,
         }
+        if phone:
+            document["phone"] = phone
         try:
             await self._collection.insert_one(document)
         except DuplicateKeyError:
@@ -102,22 +124,31 @@ class UserRepository:
         self,
         user_id: str,
         username: str,
+        email: str,
+        phone: Optional[str],
         password_hash: str,
-        phone_verified_at: datetime,
+        email_verified_at: datetime,
+        phone_verified_at: Optional[datetime] = None,
     ) -> Optional[DBUser]:
         await self._ensure_indexes()
+        set_fields = {
+            "username": username,
+            "email": email.lower(),
+            "password_hash": password_hash,
+            "is_active": True,
+            "email_verified_at": email_verified_at,
+            "phone_verified_at": phone_verified_at,
+            "updated_at": datetime.now(timezone.utc),
+        }
+        update_doc = {"$set": set_fields}
+        if phone:
+            set_fields["phone"] = phone
+        else:
+            update_doc["$unset"] = {"phone": ""}
         try:
             result = await self._collection.find_one_and_update(
                 {"id": user_id},
-                {
-                    "$set": {
-                        "username": username,
-                        "password_hash": password_hash,
-                        "is_active": True,
-                        "phone_verified_at": phone_verified_at,
-                        "updated_at": datetime.now(timezone.utc),
-                    }
-                },
+                update_doc,
                 return_document=ReturnDocument.AFTER,
             )
         except DuplicateKeyError:

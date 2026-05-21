@@ -42,9 +42,7 @@ async def connect_to_mongo():
     except Exception as e:
         # 可以选择重新抛出异常，阻止应用启动
         raise ServiceError(
-            status_code=500,
-            code="DB_CONNECTION_ERROR",
-            message="Failed to connect to MongoDB",
+            message="Failed to connect to MongoDB.",
             detail=str(e)
         )
 
@@ -69,16 +67,14 @@ def get_database(domain: str = "default") -> AsyncIOMotorDatabase:
     """
     if not database_instances:
         raise ServiceError(
-            status_code=500,
-            code="DB_NOT_INITIALIZED",
-            message="MongoDB databases have not been initialized. Check application startup."
+            message="MongoDB databases have not been initialized. Check application startup.",
+            detail="DB_NOT_INITIALIZED"
         )
     
     if domain not in database_instances:
         raise ServiceError(
-            status_code=500,
-            code="DB_DOMAIN_NOT_FOUND",
-            message=f"Database domain '{domain}' not found. Available domains: {list(database_instances.keys())}"
+            message=f"Database domain '{domain}' not found. Available domains: {list(database_instances.keys())}",
+            detail="DB_DOMAIN_NOT_FOUND"
         )
     
     return database_instances[domain]

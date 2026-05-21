@@ -40,7 +40,8 @@ class SpaceService:
         payload: CreateSpaceInvitationRequest,
         current_user_id: str,
     ) -> SpaceInvitationResponse:
-        invitee = await self._user_repository.get_by_phone(payload.phone)
+        identifier = payload.identifier or payload.phone or ""
+        invitee = await self._user_repository.get_by_identifier(identifier)
         if invitee is None or not invitee.is_active:
             raise ResourceNotFoundError(message="Invitee user not found.")
         if invitee.id == current_user_id:
@@ -70,7 +71,8 @@ class SpaceService:
         invitation = await self._space_repository.create_invitation(
             initiator_user_id=current_user_id,
             invitee_user_id=invitee.id,
-            invitee_phone=invitee.phone,
+            invitee_phone=invitee.phone or "",
+            invitee_contact=invitee.email or invitee.phone or invitee.username,
             message=payload.message,
         )
         return SpaceInvitationResponse.from_db(invitation)

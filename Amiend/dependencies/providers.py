@@ -2,7 +2,7 @@
 
 from typing import Annotated, Optional
 
-from fastapi import Depends
+from fastapi import Depends, HTTPException
 
 from core.config import settings
 from core.logger import get_logger
@@ -14,6 +14,7 @@ from infrastructure.repositories.space_repository import SpaceRepository
 from infrastructure.repositories.user_repository import UserRepository
 from services.basic.auth import AuthService, TokenService
 from services.basic.chat_context import ChatContextBuilder
+from services.basic.email import EmailService
 from services.basic.llm import ModelService
 from services.basic.message import MessageService
 from services.basic.sse import SseEventBus
@@ -91,6 +92,20 @@ async def get_message_repository() -> MessageRepository:
     return MessageRepository(get_database())
 
 
+async def get_current_active_user_id(
+    current_user_id: Annotated[str, Depends(get_current_user_id)],
+    user_repository: Annotated[UserRepository, Depends(get_user_repository)],
+) -> str:
+    """Validate that the decoded token still belongs to an active user."""
+
+    user = await user_repository.get_by_id(current_user_id)
+    if user is None:
+        raise HTTPException(status_code=401, detail="User not found.")
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="User account is inactive.")
+    return current_user_id
+
+
 def get_chat_context_builder(
     message_repository: Annotated[MessageRepository, Depends(get_message_repository)],
 ) -> ChatContextBuilder:
@@ -116,7 +131,15 @@ class _ConsoleSmsService:
         logger.info("Console SMS provider sending code. phone=%s code=%s", phone, code)
 
 
+class _ConsoleEmailService:
+    """Fallback email provider that logs codes instead of sending them."""
+
+    async def send_verification_code(self, *, email: str, code: str, scene: str) -> None:
+        logger.info("Console Email provider sending code. email=%s scene=%s code=%s", email, scene, code)
+
+
 _sms_service_singleton: SmsService | _ConsoleSmsService | None = None
+_email_service_singleton: EmailService | _ConsoleEmailService | None = None
 
 
 def get_sms_service() -> SmsService | _ConsoleSmsService:
@@ -134,10 +157,26 @@ def get_sms_service() -> SmsService | _ConsoleSmsService:
     return _sms_service_singleton
 
 
+def get_email_service() -> EmailService | _ConsoleEmailService:
+    """Provide email service; fall back to console provider if SMTP is unavailable."""
+
+    global _email_service_singleton
+    if _email_service_singleton is not None:
+        return _email_service_singleton
+
+    try:
+        _email_service_singleton = EmailService()
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Falling back to console email provider: %s", exc)
+        _email_service_singleton = _ConsoleEmailService()
+    return _email_service_singleton
+
+
 def get_auth_service(
     user_repository: Annotated[UserRepository, Depends(get_user_repository)],
     token_service: Annotated[TokenService, Depends(get_token_service)],
     sms_service: Annotated[SmsService | _ConsoleSmsService, Depends(get_sms_service)],
+    email_service: Annotated[EmailService | _ConsoleEmailService, Depends(get_email_service)],
 ) -> AuthService:
     """Provide authentication service wiring repository, token, and Redis."""
 
@@ -147,6 +186,7 @@ def get_auth_service(
         token_service=token_service,
         redis_client=redis_client,
         sms_service=sms_service,
+        email_service=email_service,
     )
 
 
@@ -193,5 +233,6 @@ SpaceServiceDep = Annotated[SpaceService, Depends(get_space_service)]
 MessageServiceDep = Annotated[MessageService, Depends(get_message_service)]
 SseEventBusDep = Annotated[SseEventBus, Depends(get_sse_event_bus)]
 SmsServiceDep = Annotated[SmsService | _ConsoleSmsService, Depends(get_sms_service)]
+EmailServiceDep = Annotated[EmailService | _ConsoleEmailService, Depends(get_email_service)]
 ModelServiceDep = Annotated[ModelService, Depends(get_model_service)]
-CurrentUserIdDep = Annotated[str, Depends(get_current_user_id)]
+CurrentUserIdDep = Annotated[str, Depends(get_current_active_user_id)]

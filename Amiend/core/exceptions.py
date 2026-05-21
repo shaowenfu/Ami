@@ -95,6 +95,12 @@ class SmsSendFailedError(BaseAPIException):
     message = "Failed to send SMS."
 
 
+class EmailSendFailedError(BaseAPIException):
+    status_code = 502
+    code = "EMAIL_SEND_FAILED"
+    message = "Failed to send email."
+
+
 # Domain errors
 class ResourceNotFoundError(BaseAPIException):
     status_code = 404
@@ -176,6 +182,7 @@ __all__ = [
     "TooManyRequestsError",
     "InvalidVerificationCodeError",
     "SmsSendFailedError",
+    "EmailSendFailedError",
     "ResourceNotFoundError",
     "PermissionDeniedError",
     "ConflictError",

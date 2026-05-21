@@ -65,7 +65,7 @@
   <div class="shell">
     <header>
       <h1>认证与授权快速指南</h1>
-      <p class="lead">基于 JWT + Redis 的基础鉴权，支持短信 OTP 与密码登录。默认短信 Provider 为控制台输出，生产可按需接入第三方。</p>
+      <p class="lead">基于 JWT + Redis 的基础鉴权，支持邮箱验证码、密码登录与一次性 refresh token。默认邮箱 Provider 为控制台输出，生产可按需接入 SMTP。</p>
       <p class="lead"><a href="/static/index.html" style="color: var(--accent); text-decoration:none;">返回静态资源导航</a></p>
     </header>
 
@@ -74,7 +74,8 @@
       <ul>
         <li><span class="pill">身份</span>用户 UUID 写入 JWT <code>sub</code>；无额外 header/query 传参。</li>
         <li><span class="pill">令牌</span><code>access</code> 短期、<code>refresh</code> 一次性；刷新记号保存在 Redis <code>auth:rt:{user_id}:{jti}</code>。</li>
-        <li><span class="pill">短信</span>默认 ConsoleSMSProvider，仅打印验证码；替换 <code>SMS_PROVIDER</code> 环境变量即可对接云短信。</li>
+        <li><span class="pill">邮箱</span>默认 ConsoleEmailProvider，仅打印验证码；配置 <code>SMTP_*</code> 环境变量即可发送真实邮件。</li>
+        <li><span class="pill">兼容</span>短信接口仍可保留给历史客户端，但当前注册与账号安全链路以邮箱为主。</li>
         <li><span class="pill">密码</span>推荐 ≥ 8 位，包含字母+数字+符号；登录失败次数自行在服务侧限流。</li>
       </ul>
     </div>
@@ -82,26 +83,26 @@
     <div class="card">
       <h2>API 速查</h2>
       <pre>
-# 发送验证码（login/register/account_delete）
-curl -X POST http://localhost:8000/auth/sms/send \
+# 发送邮箱验证码（login/register/account_delete）
+curl -X POST http://localhost:8000/auth/email/send \
   -H "Content-Type: application/json" \
-  -d '{"phone":"13800000000","scene":"login"}'
+  -d '{"email":"demo@example.com","scene":"login"}'
 
-# 验证 + 登录（短信）
-curl -X POST http://localhost:8000/auth/sms/verify \
+# 验证 + 登录（邮箱）
+curl -X POST http://localhost:8000/auth/email/verify \
   -H "Content-Type: application/json" \
-  -d '{"phone":"13800000000","code":"123456","scene":"login"}'
+  -d '{"email":"demo@example.com","code":"123456","scene":"login"}'
 # 返回 token_pair: { access_token, refresh_token }
 
 # 注册：先 verify 获取 verification_ticket，再提交
 curl -X POST http://localhost:8000/auth/register \
   -H "Content-Type: application/json" \
-  -d '{"username":"demo","phone":"13800000000","password":"Passw0rd!","verification_ticket":"..."}'
+  -d '{"username":"demo","email":"demo@example.com","password":"Passw0rd!","verification_ticket":"..."}'
 
 # 密码登录
 curl -X POST http://localhost:8000/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"identifier":"demo","password":"Passw0rd!"}'
+  -d '{"identifier":"demo@example.com","password":"Passw0rd!"}'
 
 # 刷新令牌（一次性）
 curl -X POST http://localhost:8000/auth/refresh \
@@ -148,7 +149,8 @@ async function authedRequest(path, options = {}) {
     <div class="card">
       <h2>可替换项</h2>
       <ul>
-        <li>短信：实现自定义 <code>SMSProvider</code> 并在配置中切换。</li>
+        <li>邮箱：配置 <code>SMTP_HOST</code>、<code>SMTP_USERNAME</code>、<code>SMTP_PASSWORD</code>、<code>SMTP_FROM</code> 后发送真实验证码。</li>
+        <li>短信：历史 <code>/auth/sms/*</code> 仍可作为可替换通道保留。</li>
         <li>存储：目前 Redis 保存验证码/刷新记号；如需持久化审计，可扩展数据库记录。</li>
         <li>登录方式：保留密码和短信的基础路由，可按需添加社交/OTP/企业 SSO。</li>
       </ul>

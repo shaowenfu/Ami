@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class SpaceStatus(str, Enum):
@@ -78,7 +78,8 @@ class DBSpaceInvitation(BaseModel):
     id: str
     initiator_user_id: str
     invitee_user_id: str
-    invitee_phone: str
+    invitee_phone: str = ""
+    invitee_contact: str = ""
     message: str = ""
     status: SpaceInvitationStatus
     space_id: Optional[str] = None
@@ -95,21 +96,30 @@ class DBSpaceInvitation(BaseModel):
 class CreateSpaceInvitationRequest(BaseModel):
     """Payload for inviting another user into a relationship space."""
 
-    phone: str = Field(min_length=6, max_length=20)
+    identifier: Optional[str] = Field(default=None, min_length=3, max_length=254)
+    phone: Optional[str] = Field(default=None, min_length=6, max_length=20)
     message: str = Field(default="", max_length=240)
 
-    @field_validator("phone")
+    @field_validator("identifier", "phone")
     @classmethod
-    def strip_phone(cls, value: str) -> str:
+    def strip_identifier(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
         cleaned = value.strip()
-        if not cleaned:
-            raise ValueError("phone cannot be empty")
-        return cleaned
+        return cleaned or None
 
     @field_validator("message")
     @classmethod
     def strip_message(cls, value: str) -> str:
         return value.strip()
+
+    @model_validator(mode="after")
+    def ensure_identifier(self) -> "CreateSpaceInvitationRequest":
+        if not (self.identifier or self.phone):
+            raise ValueError("identifier cannot be empty")
+        if self.identifier is None and self.phone is not None:
+            self.identifier = self.phone
+        return self
 
 
 class UpdateAgentProfileRequest(BaseModel):
@@ -151,7 +161,8 @@ class SpaceInvitationResponse(BaseModel):
     id: str
     initiator_user_id: str
     invitee_user_id: str
-    invitee_phone: str
+    invitee_phone: str = ""
+    invitee_contact: str = ""
     message: str
     status: SpaceInvitationStatus
     space_id: Optional[str]

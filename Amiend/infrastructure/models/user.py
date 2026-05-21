@@ -13,11 +13,13 @@ class DBUser(BaseModel):
     """Internal representation of user data including hashed password."""
 
     id: str
-    username: str
-    phone: str
-    password_hash: str = Field(repr=False)
-    is_active: bool
-    phone_verified_at: Optional[datetime]
+    username: str = ""
+    email: str = ""
+    phone: Optional[str] = None
+    password_hash: str = Field(default="", repr=False)
+    is_active: bool = True
+    email_verified_at: Optional[datetime] = None
+    phone_verified_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 
@@ -27,12 +29,16 @@ class DBUser(BaseModel):
     }
 
 
-class SmsScene(str, Enum):
-    """Business scenarios for SMS verification codes."""
+class VerificationScene(str, Enum):
+    """Business scenarios for verification codes."""
 
     REGISTER = "register"
     LOGIN = "login"
     ACCOUNT_DELETE = "account_delete"
+
+
+SmsScene = VerificationScene
+EmailScene = VerificationScene
 
 
 class SmsSendRequest(BaseModel):
@@ -60,6 +66,37 @@ class SmsVerifyRequest(BaseModel):
         return value.strip()
 
 
+class EmailSendRequest(BaseModel):
+    """Request body for sending an email verification code."""
+
+    email: str = Field(min_length=5, max_length=254)
+    scene: EmailScene
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        cleaned = value.strip().lower()
+        if "@" not in cleaned or "." not in cleaned.rsplit("@", 1)[-1]:
+            raise ValueError("邮箱格式不正确。")
+        return cleaned
+
+
+class EmailVerifyRequest(BaseModel):
+    """Request body for verifying an email verification code."""
+
+    email: str = Field(min_length=5, max_length=254)
+    code: str = Field(min_length=4, max_length=10)
+    scene: EmailScene
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        cleaned = value.strip().lower()
+        if "@" not in cleaned or "." not in cleaned.rsplit("@", 1)[-1]:
+            raise ValueError("邮箱格式不正确。")
+        return cleaned
+
+
 class TokenPair(BaseModel):
     """Access and refresh token pair."""
 
@@ -79,15 +116,26 @@ class SmsVerificationResponse(BaseModel):
     ticket_expires_at: Optional[datetime] = None
 
 
+class EmailVerificationResponse(BaseModel):
+    """Result of verifying an email code."""
+
+    outcome: str = Field(pattern="^(login|ticket)$")
+    token_pair: Optional[TokenPair] = None
+    verification_ticket: Optional[str] = None
+    ticket_expires_at: Optional[datetime] = None
+
+
 class UserResponse(BaseModel):
     """Public facing user payload returned by APIs."""
 
     id: str
     username: str
-    phone: str
+    email: str = ""
+    phone: Optional[str] = None
     preferred_name: str = ""
     is_active: bool
-    phone_verified_at: Optional[datetime]
+    email_verified_at: Optional[datetime] = None
+    phone_verified_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 
@@ -107,10 +155,11 @@ class LogoutRequest(BaseModel):
 
 
 class RegisterRequest(BaseModel):
-    """Request body for registering a new user (phone required)."""
+    """Request body for registering a new user with verified email."""
 
     username: str = Field(min_length=3, max_length=50)
-    phone: str = Field(min_length=6, max_length=20)
+    email: str = Field(min_length=5, max_length=254)
+    phone: Optional[str] = Field(default=None, min_length=6, max_length=20)
     password: str = Field(min_length=6, max_length=128)
     verification_ticket: str = Field(min_length=1)
 
@@ -119,10 +168,21 @@ class RegisterRequest(BaseModel):
     def strip_username(cls, value: str) -> str:
         return value.strip()
 
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        cleaned = value.strip().lower()
+        if "@" not in cleaned or "." not in cleaned.rsplit("@", 1)[-1]:
+            raise ValueError("邮箱格式不正确。")
+        return cleaned
+
     @field_validator("phone")
     @classmethod
-    def normalize_phone(cls, value: str) -> str:
-        return value.strip()
+    def normalize_phone(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
 
     @model_validator(mode="after")
     def ensure_password_complexity(self) -> "RegisterRequest":

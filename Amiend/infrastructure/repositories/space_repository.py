@@ -124,6 +124,7 @@ class SpaceRepository:
         initiator_user_id: str,
         invitee_user_id: str,
         invitee_phone: str,
+        invitee_contact: str,
         message: str,
     ) -> DBSpaceInvitation:
         await self._ensure_indexes()
@@ -133,6 +134,7 @@ class SpaceRepository:
             "initiator_user_id": initiator_user_id,
             "invitee_user_id": invitee_user_id,
             "invitee_phone": invitee_phone,
+            "invitee_contact": invitee_contact,
             "message": message,
             "status": SpaceInvitationStatus.PENDING.value,
             "space_id": None,
