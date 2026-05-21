@@ -1,1 +1,1 @@
-"""Baseline service implementations (auth/LLM/SMS/WebSocket)."""
+"""Baseline service implementations (auth/LLM/SMS/SSE)."""

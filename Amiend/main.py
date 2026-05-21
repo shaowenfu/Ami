@@ -13,11 +13,9 @@ from infrastructure.db.redis_client import connect_to_redis, close_redis_connect
 # 导入配置、路由等
 from core.config import settings
 from core.logger import setup_logging
-from routers import websocket as websocket_router  # WebSocket 路由
 from routers import auth as auth_router  # Auth 路由
 from routers import health as health_router  # Health 路由
 
-from services.basic.websocket import initialize_websocket_service, cleanup_websocket_service
 from core.memory_adapter import init_memory_adapter
 from dependencies.providers import close_model_service
 
@@ -48,20 +46,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # 初始化 Mem0 适配器（线程安全，可重复调用）
     init_memory_adapter()
     
-    # 初始化 WebSocket 服务（基础版本，无领域耦合）
-    initialize_websocket_service()
-    print(f"[{settings.APP_NAME}] WebSocket Service initialized.")
-    
     # yield 语句将控制权交给 FastAPI，应用开始接受请求
     yield
     
     # --- B. 应用关闭 (Shutdown) 逻辑 ---
     
     print(f"[{settings.APP_NAME}] Application Shutdown Event triggered.")
-    
-    # 清理 WebSocket 服务
-    cleanup_websocket_service()
-    print(f"[{settings.APP_NAME}] WebSocket Service cleaned up.")
     
     # 关闭 MongoDB 连接
     await close_mongo_connection()
@@ -78,10 +68,10 @@ app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
     description="""
-Minimal FastAPI starter with JWT Auth + WebSocket base.
+Minimal FastAPI starter with JWT Auth + SSE stream.
 
 - HTTP: /auth/*, /health
-- WS: /ws/chat (JWT via Sec-WebSocket-Protocol)
+- Stream: Server-Sent Events (SSE) exclusively for real-time
 - Static: /static/index.html for samples
 """,
     lifespan=lifespan,  # 关键：将生命周期管理器传递给应用
@@ -116,8 +106,7 @@ app.exception_handler(BaseAPIException)(unified_api_exception_handler)
 app.exception_handler(Exception)(generic_exception_handler)
 
 # 聚合路由
-# 注册 WebSocket、Auth、Health 路由
-app.include_router(websocket_router.router)
+# 注册 Auth、Health 路由
 app.include_router(auth_router.router)
 app.include_router(health_router.router)
 
