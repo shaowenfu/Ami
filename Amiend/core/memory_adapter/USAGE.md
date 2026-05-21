@@ -1,28 +1,24 @@
 # Memory Adapter 使用指南
 
-该模块是一个可以直接放入 `/core` 的 Mem0 适配器，不需要修改其他目录即可为后端提供记忆读写能力。按照以下步骤集成：
+该模块是一个可以直接放入 `/core` 的记忆适配器，不需要业务层直接依赖 Mem0 SDK 即可提供记忆读写能力。当前默认目标是 Mem0 Platform，同时保留禁用状态下的 in-memory backend 方便本地启动。
 
 ## 1. 安装依赖
-运行环境需要包含以下库（版本与现有项目可保持一致）：
-- `mem0`
-- `langchain-community`
-- `dashscope`
-- `openai>=1.0.0`
+运行环境需要包含以下库：
+- `mem0ai`
 - `python-dotenv`
 
 ## 2. 配置环境变量
 在 `.env` 或配置中心写入：
 ```
-DEEPSEEK_API_KEY=...
-DEEPSEEK_CHAT_MODEL=deepseek-chat
-DEEPSEEK_API_BASE=https://api.deepseek.com
-DASHSCOPE_API_KEY=... # 推荐使用该变量名；兼容 ALIBABA_API_KEY
-DASHSCOPE_EMBED_MODEL=text-embedding-v2
-MEM0_USER_ID=123666
-MEM0_VECTOR_STORE_PATH=可选自定义路径
+MEM0_ENABLED=true
+MEMORY_PROVIDER=mem0_platform
+MEM0_API_KEY=...
+MEM0_DEFAULT_AGENT_PREFIX=ami
+MEM0_SEARCH_LIMIT=6
+MEMORY_DEFAULT_USER_ID=demo-user
 MEM0_NORMALIZATION_FILE=可选规则文件路径
 ```
-如果不设置 `MEM0_VECTOR_STORE_PATH`，适配器会默认写入 `core/memory_adapter/storage/persistent_memories_db`。确保该目录可写并在 `.gitignore` 中忽略。
+如果 `MEM0_ENABLED=false`，启动时会使用本地 in-memory backend，不需要 `MEM0_API_KEY`。
 
 ## 3. 应用启动时初始化
 在后端启动流程（如 `main.py` 的 lifespan）中调用一次 `init_memory_adapter()`：
@@ -36,11 +32,13 @@ def lifespan(app: FastAPI):
 该函数会校验必要的环境变量并创建共享的 `Memory` 实例，可安全重复调用。
 
 ## 4. 使用公开方法
-- `store_memories(messages, user_id=None)`  
-  `messages` 为 `{ "role": str, "content": str }` 的列表，空值会被自动过滤。
-- `fetch_memories(query, user_id=None, limit=3, context=None)`  
-  先执行 `query_normalization`，再返回记忆字符串列表。`context` 可传入 `{"replacements": {"他": "李雷"}}` 这类临时映射。
-- `build_memory_block(query, user_id=None, limit=3, header="相关记忆：")`  
+- `store_memories(messages, user_id=None, agent_id=None, metadata=None, infer=True)`
+  `messages` 为 `{ "role": str, "content": str }` 的列表，空值会被自动过滤。`metadata` 应写入 `space_id`、`visibility`、`source` 等审计字段。
+- `fetch_memory_snippets(query, filters=..., limit=6, context=None)`
+  先执行 `query_normalization`，再用 Mem0 filters 返回结构化 `MemorySnippet` 列表。
+- `fetch_memories(query, user_id=None, limit=3, context=None, filters=None)`
+  返回纯文本记忆列表，主要用于兼容旧调用。
+- `build_memory_block(query, user_id=None, limit=3, header="相关记忆：", filters=None)`
   直接返回格式化好的中文记忆块，例如：
   ```
   相关记忆：
@@ -49,35 +47,21 @@ def lifespan(app: FastAPI):
   ```
   可直接放入 prompt 的 system 字段或其它上下文。
 
-如果未传 `user_id`，会退回到 `MEM0_USER_ID`，多用户场景请务必传入真实用户 ID。
+如果未传 `user_id`，会退回到 `MEMORY_DEFAULT_USER_ID`，多用户场景请务必传入真实用户 ID 或显式 filters。
 
-**多层级命名空间（可选）**  
-Mem0 仅提供 `user_id` 维度的隔离。如果需要在“用户”之下再细分（例如按 agent），推荐在业务层拼接命名空间：
+**Ami 空间命名空间**
+关系空间内统一使用以下命名空间：
 ```python
-def agent_scope(user_id: str, agent_id: str) -> str:
-    return f"{user_id}:{agent_id}"
-
-store_memories(messages, user_id=agent_scope(user_id, agent_id))
-fetch_memories(query, user_id=agent_scope(user_id, agent_id))
+private_user_id = f"space:{space_id}:private:{user_id}"
+shared_user_id = f"space:{space_id}:shared"
+agent_id = f"ami:{space_id}"
 ```
-这样不同 agent 的记忆互不干扰，同时仍可在需要时遍历该用户的所有 agent 来实现“用户级”聚合。
+私聊查询只能召回当前用户私聊记忆与 shared 记忆；群聊查询只能召回 shared 记忆。业务层应优先通过 `services.basic.chat_context.ChatContextBuilder` 统一构建 filters。
 
 ## 5. 运维提示
-- 适配器内部是同步实现，但线程安全。FastAPI 默认在线程池中执行同步函数，不会阻塞事件循环。
-- 真正的瓶颈通常是 DashScope/DeepSeek 请求配额，注意监控并定期更换 Key。
+- 适配器内部是同步实现；异步服务中建议使用 `asyncio.to_thread` 包裹，当前 `ChatContextBuilder` 已这样处理。
+- 真正的瓶颈通常是 Mem0 / LLM 请求配额，注意监控调用量与失败率。
 - 若后续要拆分成独立服务，直接连同 `.env` 配置一起复制整个 `core/memory_adapter` 目录即可，无需调整其他代码。
-
-### 健康检查（连通性与密钥有效性）
-提供脚本 `scripts/healthcheck_dashscope.py` 验证以下内容：
-- 环境变量发现：优先 `DASHSCOPE_API_KEY`，兼容 `ALIBABA_API_KEY`。
-- 基础网络连通：请求 DashScope 兼容端点。
-- 嵌入向量生成：调用 `langchain-community` 的 `DashScopeEmbeddings`。
-
-运行方式：
-```
-python scripts/healthcheck_dashscope.py
-```
-脚本会输出结构化结果，失败时以非零退出码终止，便于 CI 集成。
 
 ## 6. Query Normalization 规则维护
 - 默认规则文件为 `core/memory_adapter/normalization_map.json`，可通过 `MEM0_NORMALIZATION_FILE` 指向自定义路径。

@@ -1,4 +1,4 @@
-"""Core dependency providers for the framework base (auth/DB/LLM/memory/WS)."""
+"""Core dependency providers for auth, data access, LLM, memory, and SSE."""
 
 from typing import Annotated, Optional
 
@@ -13,6 +13,7 @@ from infrastructure.repositories.message_repository import MessageRepository
 from infrastructure.repositories.space_repository import SpaceRepository
 from infrastructure.repositories.user_repository import UserRepository
 from services.basic.auth import AuthService, TokenService
+from services.basic.chat_context import ChatContextBuilder
 from services.basic.llm import ModelService
 from services.basic.message import MessageService
 from services.basic.sse import SseEventBus
@@ -90,6 +91,14 @@ async def get_message_repository() -> MessageRepository:
     return MessageRepository(get_database())
 
 
+def get_chat_context_builder(
+    message_repository: Annotated[MessageRepository, Depends(get_message_repository)],
+) -> ChatContextBuilder:
+    """Provide the single entry point for Mongo + memory chat context."""
+
+    return ChatContextBuilder(message_repository=message_repository)
+
+
 # -----------------------------------------------------------------
 # Auth / token / SMS providers
 # -----------------------------------------------------------------
@@ -104,7 +113,7 @@ class _ConsoleSmsService:
     """Fallback SMS provider that logs codes instead of sending them."""
 
     async def send_login_code(self, phone: str, code: str) -> None:
-        logger.info("Console SMS provider sending code", phone=phone, code=code)
+        logger.info("Console SMS provider sending code. phone=%s code=%s", phone, code)
 
 
 _sms_service_singleton: SmsService | _ConsoleSmsService | None = None
@@ -157,6 +166,7 @@ def get_message_service(
     message_repository: Annotated[MessageRepository, Depends(get_message_repository)],
     space_repository: Annotated[SpaceRepository, Depends(get_space_repository)],
     event_bus: Annotated[SseEventBus, Depends(get_sse_event_bus)],
+    context_builder: Annotated[ChatContextBuilder, Depends(get_chat_context_builder)],
 ) -> MessageService:
     """Provide space message workflows."""
 
@@ -165,6 +175,7 @@ def get_message_service(
         space_repository=space_repository,
         event_bus=event_bus,
         model_service_factory=lambda: get_model_service(get_config()),
+        context_builder=context_builder,
     )
 
 
@@ -175,6 +186,7 @@ def get_message_service(
 UserRepositoryDep = Annotated[UserRepository, Depends(get_user_repository)]
 SpaceRepositoryDep = Annotated[SpaceRepository, Depends(get_space_repository)]
 MessageRepositoryDep = Annotated[MessageRepository, Depends(get_message_repository)]
+ChatContextBuilderDep = Annotated[ChatContextBuilder, Depends(get_chat_context_builder)]
 TokenServiceDep = Annotated[TokenService, Depends(get_token_service)]
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
 SpaceServiceDep = Annotated[SpaceService, Depends(get_space_service)]

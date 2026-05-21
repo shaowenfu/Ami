@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Callable, Optional, TYPE_CHECKING
 
 from core.exceptions import LLMServiceError
 from core.exceptions import PermissionDeniedError, ResourceNotFoundError
+from core.logger import get_logger
+from core.memory_adapter import is_memory_enabled, store_memories
 from infrastructure.models.message import (
     CreateMessageRequest,
     MessageResponse,
@@ -15,10 +18,19 @@ from infrastructure.models.message import (
 from infrastructure.models.space import SpaceStatus
 from infrastructure.repositories.message_repository import MessageRepository
 from infrastructure.repositories.space_repository import SpaceRepository
+from services.basic.chat_context import (
+    ChatContextBuilder,
+    ami_agent_id,
+    memory_visibility_for_room,
+    private_memory_user_id,
+    shared_memory_user_id,
+)
 from services.basic.sse import SseEventBus
 
 if TYPE_CHECKING:  # pragma: no cover
     from services.basic.llm import ModelService
+
+logger = get_logger(__name__)
 
 
 class MessageService:
@@ -31,11 +43,13 @@ class MessageService:
         space_repository: SpaceRepository,
         event_bus: SseEventBus,
         model_service_factory: Callable[[], "ModelService"],
+        context_builder: ChatContextBuilder,
     ) -> None:
         self._message_repository = message_repository
         self._space_repository = space_repository
         self._event_bus = event_bus
         self._model_service_factory = model_service_factory
+        self._context_builder = context_builder
 
     async def list_messages(
         self,
@@ -96,6 +110,7 @@ class MessageService:
         current_user_id: str,
         room_scope: str,
         user_input: str,
+        user_message_id: Optional[str] = None,
     ) -> None:
         """Generate a basic Ami reply and stream it through SSE."""
 
@@ -103,8 +118,18 @@ class MessageService:
         chunks: list[str] = []
         try:
             model_service = self._model_service_factory()
+            chat_context = await self._context_builder.build_chat_context(
+                space_id=space_id,
+                current_user_id=current_user_id,
+                room_scope=room_scope,
+                query=user_input,
+            )
+            system_prompt = self._build_system_prompt(
+                room_scope=room_scope,
+                context_block=chat_context.to_prompt_block(),
+            )
             async for chunk in model_service.generate_response_stream(
-                system_prompt=self._build_basic_system_prompt(room_scope),
+                system_prompt=system_prompt,
                 user_input=user_input,
             ):
                 chunks.append(chunk)
@@ -147,6 +172,19 @@ class MessageService:
                     "message": response.model_dump(mode="json"),
                 },
             )
+            await self._digest_exchange_to_memory(
+                space_id=space_id,
+                current_user_id=current_user_id,
+                room_scope=room_scope,
+                user_input=user_input,
+                agent_output=content,
+                source_msg_ids=[
+                    message_id
+                    for message_id in (user_message_id, response.id)
+                    if message_id
+                ],
+                target_user_ids=target_user_ids,
+            )
         except Exception as exc:
             await self._event_bus.publish_space_event(
                 space_id=space_id,
@@ -159,6 +197,62 @@ class MessageService:
                     "sender_id": f"ami:{space_id}",
                     "error": str(exc),
                 },
+            )
+
+    async def _digest_exchange_to_memory(
+        self,
+        *,
+        space_id: str,
+        current_user_id: str,
+        room_scope: str,
+        user_input: str,
+        agent_output: str,
+        source_msg_ids: list[str],
+        target_user_ids: Optional[set[str]],
+    ) -> None:
+        try:
+            if not is_memory_enabled():
+                return
+            memory_user_id = (
+                shared_memory_user_id(space_id)
+                if room_scope == "SHARED"
+                else private_memory_user_id(space_id, current_user_id)
+            )
+            result = await asyncio.to_thread(
+                store_memories,
+                [
+                    {"role": "user", "content": user_input},
+                    {"role": "assistant", "content": agent_output},
+                ],
+                memory_user_id,
+                ami_agent_id(space_id),
+                metadata={
+                    "space_id": space_id,
+                    "visibility": memory_visibility_for_room(room_scope),
+                    "room_scope": room_scope,
+                    "source": "chat_exchange",
+                    "source_msg_ids": source_msg_ids,
+                    "created_by": "message_service",
+                },
+                infer=True,
+            )
+            await self._event_bus.publish_space_event(
+                space_id=space_id,
+                event="memory.digest.completed",
+                target_user_ids=target_user_ids,
+                data={
+                    "space_id": space_id,
+                    "room_scope": room_scope,
+                    "source_msg_ids": source_msg_ids,
+                    "status": str(result.get("status", "SUCCEEDED")),
+                },
+            )
+        except Exception as exc:
+            logger.warning(
+                "Memory digest failed; chat message remains persisted. space_id=%s room_scope=%s error=%s",
+                space_id,
+                room_scope,
+                str(exc),
             )
 
     async def _require_space_member(self, space_id: str, user_id: str) -> None:
@@ -175,14 +269,22 @@ class MessageService:
         return f"PRIVATE:{current_user_id}"
 
     @staticmethod
-    def _build_basic_system_prompt(room_scope: str) -> str:
+    def _build_system_prompt(room_scope: str, context_block: str) -> str:
         privacy_rule = (
             "This is a shared room with both partners and Ami. Never mention private-room facts."
             if room_scope == "SHARED"
             else "This is a private room between the current user and Ami. Do not reveal it to the partner."
         )
-        return (
+        prompt = (
             "You are Ami, a warm relationship companion for a two-person relationship space. "
             "Reply in concise, gentle Chinese. Help the user feel heard, clarify needs, and suggest one small next step. "
             f"{privacy_rule}"
+        )
+        if not context_block:
+            return prompt
+        return (
+            f"{prompt}\n\n"
+            "Use the following context only when it is relevant. "
+            "Do not quote internal ids or expose private-room context in shared-room replies.\n\n"
+            f"{context_block}"
         )

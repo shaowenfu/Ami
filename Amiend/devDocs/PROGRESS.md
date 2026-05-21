@@ -18,3 +18,5 @@ Purpose: track important/structural updates. Keep entries concise, deterministic
 | 2026-05-21 | Streams/Config  | Replaced WebSocket runtime assumptions with SSE settings and stream errors. | Codex    |
 | 2026-05-21 | Spaces/Messages | Added relationship space invitations plus Mongo-backed messages and space SSE stream endpoints. | Codex    |
 | 2026-05-21 | Agent Streaming | Added background Ami reply generation that emits message delta/completed/failed SSE events. | Codex    |
+| 2026-05-21 | Memory/Context | Added chat context builder and Mem0 Platform Adapter with private/shared memory filters. | Codex    |
+| 2026-05-21 | Memory Digest | Persisted completed chat exchanges to Mem0 and emit memory.digest.completed over SSE. | Codex    |

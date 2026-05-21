@@ -1,14 +1,4 @@
-"""
-Memory adapter configuration placeholders.
-
-This file intentionally avoids provider-specific defaults. Engineers should
-decide the vector store + embedding/LLM stack, then extend `MemorySettings`
-and `_build_backend` accordingly.
-
-TODO:
-- Add your memory backend configuration fields (API keys, endpoints, models).
-- Implement a concrete backend in `connector.py` that uses these fields.
-"""
+"""Memory adapter configuration."""
 from __future__ import annotations
 
 import os
@@ -19,21 +9,17 @@ from typing import Optional
 
 @dataclass(frozen=True)
 class MemorySettings:
-    """
-    Minimal memory adapter settings.
-
-    Fields:
-    - enabled: Toggle memory adapter usage.
-    - default_user_id: Fallback user id when none is provided.
-    - vector_store_path: Local path for vector store/persistence (if used).
-    - backend: Optional backend name for your implementation.
-    - extra: Optional dict-like string for custom config (JSON or key=value pairs).
-    """
+    """Runtime settings for the memory adapter."""
 
     enabled: bool
+    provider: str
     default_user_id: str
+    default_agent_prefix: str
+    search_limit: int
     vector_store_path: Path
-    backend: Optional[str]
+    mem0_api_key: Optional[str]
+    mem0_org_id: Optional[str]
+    mem0_project_id: Optional[str]
     extra: Optional[str]
 
 
@@ -43,8 +29,13 @@ _settings: Optional[MemorySettings] = None
 def load_settings() -> MemorySettings:
     """Load memory settings from environment variables."""
 
-    enabled_raw = os.getenv("MEMORY_ENABLED", "false").lower()
+    enabled_raw = os.getenv("MEM0_ENABLED", os.getenv("MEMORY_ENABLED", "false")).lower()
     enabled = enabled_raw not in {"0", "false", "off", "no"}
+    provider = (
+        os.getenv("MEMORY_PROVIDER")
+        or os.getenv("MEMORY_BACKEND")
+        or ("mem0_platform" if os.getenv("MEM0_API_KEY") else "in_memory")
+    )
     base_dir = Path(os.getenv("MEMORY_BASE_DIR", Path(__file__).resolve().parent))
     vector_store_path = Path(
         os.getenv(
@@ -56,9 +47,14 @@ def load_settings() -> MemorySettings:
 
     return MemorySettings(
         enabled=enabled,
+        provider=provider,
         default_user_id=os.getenv("MEMORY_DEFAULT_USER_ID", "demo-user"),
+        default_agent_prefix=os.getenv("MEM0_DEFAULT_AGENT_PREFIX", "ami"),
+        search_limit=int(os.getenv("MEM0_SEARCH_LIMIT", "6")),
         vector_store_path=vector_store_path,
-        backend=os.getenv("MEMORY_BACKEND"),
+        mem0_api_key=os.getenv("MEM0_API_KEY"),
+        mem0_org_id=os.getenv("MEM0_ORG_ID"),
+        mem0_project_id=os.getenv("MEM0_PROJECT_ID"),
         extra=os.getenv("MEMORY_EXTRA"),
     )
 

@@ -61,6 +61,7 @@ async def create_message(
         current_user_id=current_user_id,
         room_scope=message.room_scope,
         user_input=message.content,
+        user_message_id=message.id,
     )
     return message
 

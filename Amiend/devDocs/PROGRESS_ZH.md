@@ -18,3 +18,5 @@
 | 2026-05-21 | 实时流/配置    | 将运行时实时通信假设从 WebSocket 切换为 SSE 配置与流式异常命名。    | Codex  |
 | 2026-05-21 | 空间/消息      | 新增关系空间邀请、Mongo 消息持久化与空间 SSE 事件流端点。          | Codex  |
 | 2026-05-21 | Agent 流式回复 | 新增 Ami 后台回复生成，并通过 SSE 推送 delta/completed/failed 事件。 | Codex  |
+| 2026-05-21 | 记忆/上下文    | 新增聊天上下文构建器与 Mem0 Platform Adapter，支持按私聊/群聊过滤召回长期记忆。 | Codex  |
+| 2026-05-21 | 记忆消化       | Ami 回复完成后异步写入 Mem0，并通过 SSE 发布 memory.digest.completed。 | Codex  |

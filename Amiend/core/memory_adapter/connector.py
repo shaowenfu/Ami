@@ -1,16 +1,13 @@
-"""
-Memory adapter façade.
+"""Memory adapter façade.
 
-This is a framework-only placeholder. It exposes a minimal API and a trivial
-in-memory backend to keep the project runnable without pulling provider SDKs.
-
-TODO:
-- Replace `_InMemoryBackend` with your own implementation (e.g., Mem0/Chroma + embeddings).
-- Wire your backend construction logic in `_build_backend(settings)`.
+The business layer should depend on this module instead of importing Mem0 SDK
+objects directly. The adapter keeps a small in-memory backend for local
+development, and can switch to Mem0 Platform by setting env vars.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Dict, Mapping, MutableSequence, Optional, Sequence
 
 from core.logger import get_logger
@@ -21,38 +18,169 @@ from .normalizer import normalize_query
 logger = get_logger(__name__)
 
 
-class MemoryBackend:
-    """Backend contract; implement add/search for your storage."""
+@dataclass(frozen=True)
+class MemorySnippet:
+    """Normalized memory search result used by application services."""
 
-    def add(self, messages: Sequence[Mapping[str, str]], user_id: str, agent_id: Optional[str]) -> None:
+    text: str
+    id: Optional[str] = None
+    score: Optional[float] = None
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+    raw: Any = None
+
+
+class MemoryBackend:
+    """Backend contract shared by in-memory and Mem0 Platform implementations."""
+
+    def add(
+        self,
+        messages: Sequence[Mapping[str, str]],
+        *,
+        user_id: str,
+        agent_id: Optional[str],
+        metadata: Optional[Mapping[str, Any]],
+        infer: bool = True,
+    ) -> Mapping[str, Any]:
         raise NotImplementedError("Implement memory add() for your backend.")
 
-    def search(self, query: str, user_id: str, agent_id: Optional[str], limit: int) -> list[str]:
+    def search(
+        self,
+        query: str,
+        *,
+        filters: Mapping[str, Any],
+        limit: int,
+    ) -> list[MemorySnippet]:
         raise NotImplementedError("Implement memory search() for your backend.")
 
 
 class _InMemoryBackend(MemoryBackend):
-    """Minimal in-memory backend for bootstrapping."""
+    """Minimal scoped backend for bootstrapping and tests."""
 
     def __init__(self) -> None:
-        self._store: Dict[tuple[str, Optional[str]], list[str]] = {}
+        self._store: list[dict[str, Any]] = []
 
-    def add(self, messages: Sequence[Mapping[str, str]], user_id: str, agent_id: Optional[str]) -> None:
-        key = (user_id, agent_id)
-        bucket = self._store.setdefault(key, [])
-        for msg in messages:
-            bucket.append(f"{msg.get('role','')}: {msg.get('content','')}")
+    def add(
+        self,
+        messages: Sequence[Mapping[str, str]],
+        *,
+        user_id: str,
+        agent_id: Optional[str],
+        metadata: Optional[Mapping[str, Any]],
+        infer: bool = True,
+    ) -> Mapping[str, Any]:
+        text = "\n".join(
+            f"{message.get('role', '')}: {message.get('content', '')}".strip()
+            for message in messages
+            if str(message.get("content", "")).strip()
+        )
+        if not text:
+            return {"status": "SKIPPED", "reason": "empty_messages"}
 
-    def search(self, query: str, user_id: str, agent_id: Optional[str], limit: int) -> list[str]:
-        key = (user_id, agent_id)
-        bucket = self._store.get(key, [])
-        return bucket[-limit:] if limit > 0 else bucket
+        memory_id = f"local-{len(self._store) + 1}"
+        self._store.append(
+            {
+                "id": memory_id,
+                "memory": text,
+                "user_id": user_id,
+                "agent_id": agent_id,
+                "metadata": dict(metadata or {}),
+                "infer": infer,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        return {"status": "SUCCEEDED", "id": memory_id}
+
+    def search(
+        self,
+        query: str,
+        *,
+        filters: Mapping[str, Any],
+        limit: int,
+    ) -> list[MemorySnippet]:
+        matches = [record for record in self._store if _matches_filter(record, filters)]
+        selected = matches[-limit:] if limit > 0 else matches
+        return [
+            MemorySnippet(
+                id=str(record.get("id")),
+                text=str(record.get("memory", "")),
+                metadata=record.get("metadata") or {},
+                raw=record,
+            )
+            for record in selected
+        ]
+
+
+class _Mem0PlatformBackend(MemoryBackend):
+    """Mem0 Platform backend using the official `mem0ai` SDK."""
+
+    def __init__(self, settings: MemorySettings) -> None:
+        if not settings.mem0_api_key:
+            raise RuntimeError("MEM0_API_KEY is required when MEMORY_PROVIDER=mem0_platform.")
+
+        try:
+            from mem0 import MemoryClient
+        except ImportError as exc:  # pragma: no cover - depends on optional SDK
+            raise RuntimeError("mem0ai is not installed. Add `mem0ai` to the backend environment.") from exc
+
+        kwargs: dict[str, str] = {"api_key": settings.mem0_api_key}
+        if settings.mem0_org_id:
+            kwargs["org_id"] = settings.mem0_org_id
+        if settings.mem0_project_id:
+            kwargs["project_id"] = settings.mem0_project_id
+        self._client = MemoryClient(**kwargs)
+
+    def add(
+        self,
+        messages: Sequence[Mapping[str, str]],
+        *,
+        user_id: str,
+        agent_id: Optional[str],
+        metadata: Optional[Mapping[str, Any]],
+        infer: bool = True,
+    ) -> Mapping[str, Any]:
+        payload: dict[str, Any] = {
+            "messages": [dict(message) for message in messages],
+            "user_id": user_id,
+            "infer": infer,
+        }
+        if agent_id:
+            payload["agent_id"] = agent_id
+        if metadata:
+            payload["metadata"] = dict(metadata)
+
+        try:
+            result = self._client.add(**payload)
+        except TypeError:
+            payload.pop("infer", None)
+            result = self._client.add(**payload)
+
+        if isinstance(result, Mapping):
+            return result
+        return {"result": result}
+
+    def search(
+        self,
+        query: str,
+        *,
+        filters: Mapping[str, Any],
+        limit: int,
+    ) -> list[MemorySnippet]:
+        try:
+            result = self._client.search(query, filters=dict(filters), top_k=limit)
+        except TypeError:
+            try:
+                result = self._client.search(query, filters=dict(filters), limit=limit)
+            except TypeError:
+                result = self._client.search(query, filters=dict(filters))
+        return _normalize_search_results(result, limit=limit)
 
 
 @dataclass(frozen=True)
 class MemoryClients:
     backend: MemoryBackend
     default_user_id: str
+    default_agent_prefix: str
+    search_limit: int
     enabled: bool
 
 
@@ -60,12 +188,16 @@ _clients: Optional[MemoryClients] = None
 
 
 def _build_backend(settings: MemorySettings) -> MemoryBackend:
-    """
-    TODO: Replace this constructor with your real backend wiring.
-    """
-    logger.info(
-        "Memory adapter using in-memory backend. Set MEMORY_BACKEND and implement _build_backend to change."
-    )
+    if not settings.enabled:
+        logger.info("Memory adapter disabled; using inert in-memory backend.")
+        return _InMemoryBackend()
+
+    provider = (settings.provider or "in_memory").lower()
+    if provider in {"mem0", "mem0_platform", "platform"}:
+        logger.info("Memory adapter using Mem0 Platform backend.")
+        return _Mem0PlatformBackend(settings)
+
+    logger.info("Memory adapter using in-memory backend: %s", provider)
     return _InMemoryBackend()
 
 
@@ -81,6 +213,8 @@ def init_memory_adapter(settings: Optional[MemorySettings] = None) -> MemoryClie
     _clients = MemoryClients(
         backend=backend,
         default_user_id=effective_settings.default_user_id,
+        default_agent_prefix=effective_settings.default_agent_prefix,
+        search_limit=effective_settings.search_limit,
         enabled=effective_settings.enabled,
     )
     return _clients
@@ -89,16 +223,19 @@ def init_memory_adapter(settings: Optional[MemorySettings] = None) -> MemoryClie
 def _require_clients() -> MemoryClients:
     if _clients is None:
         init_memory_adapter()
-    return _clients  # type: ignore
+    return _clients  # type: ignore[return-value]
 
 
 def store_memories(
     messages: Sequence[Mapping[str, str]],
     user_id: Optional[str] = None,
     agent_id: Optional[str] = None,
-) -> None:
+    *,
+    metadata: Optional[Mapping[str, Any]] = None,
+    infer: bool = True,
+) -> Mapping[str, Any]:
     if not messages:
-        return
+        return {"status": "SKIPPED", "reason": "empty_messages"}
     clients = _require_clients()
     if not clients.enabled:
         raise RuntimeError("Memory adapter is disabled; enable it before storing memories.")
@@ -112,12 +249,39 @@ def store_memories(
         normalized.append({"role": role, "content": content})
 
     if not normalized:
-        return
+        return {"status": "SKIPPED", "reason": "empty_messages"}
 
-    clients.backend.add(
+    return clients.backend.add(
         normalized,
         user_id=user_id or clients.default_user_id,
         agent_id=agent_id,
+        metadata=metadata,
+        infer=infer,
+    )
+
+
+def fetch_memory_snippets(
+    query: str,
+    *,
+    filters: Optional[Mapping[str, Any]] = None,
+    user_id: Optional[str] = None,
+    agent_id: Optional[str] = None,
+    limit: Optional[int] = None,
+    context: Optional[Mapping[str, Any]] = None,
+) -> list[MemorySnippet]:
+    cleaned_query = normalize_query(query, context=context)
+    if not cleaned_query:
+        return []
+    clients = _require_clients()
+    if not clients.enabled:
+        raise RuntimeError("Memory adapter is disabled; enable it before fetching memories.")
+
+    safe_limit = max(1, limit or clients.search_limit)
+    effective_filters = dict(filters or _legacy_entity_filter(user_id or clients.default_user_id, agent_id))
+    return clients.backend.search(
+        query=cleaned_query,
+        filters=effective_filters,
+        limit=safe_limit,
     )
 
 
@@ -127,21 +291,18 @@ def fetch_memories(
     agent_id: Optional[str] = None,
     limit: int = 3,
     context: Optional[Mapping[str, Any]] = None,
+    *,
+    filters: Optional[Mapping[str, Any]] = None,
 ) -> list[str]:
-    cleaned_query = normalize_query(query, context=context)
-    if not cleaned_query:
-        return []
-    clients = _require_clients()
-    if not clients.enabled:
-        raise RuntimeError("Memory adapter is disabled; enable it before fetching memories.")
-
-    limit = max(1, limit)
-    return clients.backend.search(
-        query=cleaned_query,
-        user_id=user_id or clients.default_user_id,
+    snippets = fetch_memory_snippets(
+        query=query,
+        filters=filters,
+        user_id=user_id,
         agent_id=agent_id,
         limit=limit,
+        context=context,
     )
+    return [snippet.text for snippet in snippets if snippet.text]
 
 
 def build_memory_block(
@@ -151,8 +312,17 @@ def build_memory_block(
     limit: int = 3,
     header: str = "Relevant memories:",
     context: Optional[Mapping[str, Any]] = None,
+    *,
+    filters: Optional[Mapping[str, Any]] = None,
 ) -> str:
-    snippets = fetch_memories(query=query, user_id=user_id, agent_id=agent_id, limit=limit, context=context)
+    snippets = fetch_memories(
+        query=query,
+        user_id=user_id,
+        agent_id=agent_id,
+        limit=limit,
+        context=context,
+        filters=filters,
+    )
     if not snippets:
         return ""
     lines = "\n".join(f"- {snippet}" for snippet in snippets)
@@ -161,3 +331,73 @@ def build_memory_block(
 
 def is_memory_enabled() -> bool:
     return _require_clients().enabled
+
+
+def _legacy_entity_filter(user_id: str, agent_id: Optional[str]) -> Mapping[str, Any]:
+    if agent_id:
+        return {"OR": [{"user_id": user_id}, {"agent_id": agent_id}]}
+    return {"user_id": user_id}
+
+
+def _normalize_search_results(result: Any, *, limit: int) -> list[MemorySnippet]:
+    if isinstance(result, Mapping):
+        raw_items = result.get("results") or result.get("memories") or []
+    else:
+        raw_items = result or []
+
+    snippets: list[MemorySnippet] = []
+    for item in list(raw_items)[:limit]:
+        if isinstance(item, Mapping):
+            text = str(item.get("memory") or item.get("text") or item.get("content") or "").strip()
+            if not text:
+                continue
+            score_raw = item.get("score")
+            score = float(score_raw) if isinstance(score_raw, (int, float)) else None
+            snippets.append(
+                MemorySnippet(
+                    id=str(item.get("id")) if item.get("id") else None,
+                    text=text,
+                    score=score,
+                    metadata=item.get("metadata") or {},
+                    raw=item,
+                )
+            )
+        else:
+            text = str(item).strip()
+            if text:
+                snippets.append(MemorySnippet(text=text, raw=item))
+    return snippets
+
+
+def _matches_filter(record: Mapping[str, Any], condition: Mapping[str, Any]) -> bool:
+    if not condition:
+        return True
+    if "AND" in condition:
+        return all(_matches_filter(record, item) for item in condition["AND"])
+    if "OR" in condition:
+        return any(_matches_filter(record, item) for item in condition["OR"])
+    if "NOT" in condition:
+        value = condition["NOT"]
+        if isinstance(value, list):
+            return not any(_matches_filter(record, item) for item in value)
+        return not _matches_filter(record, value)
+
+    for key, expected in condition.items():
+        actual = record.get(key)
+        if key == "metadata" and isinstance(expected, Mapping):
+            actual_metadata = record.get("metadata") or {}
+            for metadata_key, metadata_value in expected.items():
+                if actual_metadata.get(metadata_key) != metadata_value:
+                    return False
+            continue
+        if isinstance(expected, Mapping):
+            if "in" in expected and actual not in expected["in"]:
+                return False
+            if "ne" in expected and actual == expected["ne"]:
+                return False
+            if "eq" in expected and actual != expected["eq"]:
+                return False
+            continue
+        if actual != expected:
+            return False
+    return True

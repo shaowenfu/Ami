@@ -7,8 +7,10 @@ extend configuration to wire your own memory stack.
 
 from .config import MemorySettings, get_memory_settings
 from .connector import (
+    MemorySnippet,
     build_memory_block,
     fetch_memories,
+    fetch_memory_snippets,
     init_memory_adapter,
     is_memory_enabled,
     store_memories,
@@ -17,10 +19,12 @@ from .normalizer import normalize_query
 
 __all__ = [
     "MemorySettings",
+    "MemorySnippet",
     "get_memory_settings",
     "init_memory_adapter",
     "build_memory_block",
     "fetch_memories",
+    "fetch_memory_snippets",
     "store_memories",
     "normalize_query",
     "is_memory_enabled",

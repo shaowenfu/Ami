@@ -78,11 +78,13 @@ class Settings:
         # -----------------------------------------------------------------------
         # Memory / Context Configuration
         # -----------------------------------------------------------------------
-        self.MEMORY_ENABLED: bool = os.getenv("MEMORY_ENABLED", "false").lower() == "true"
+        self.MEMORY_ENABLED: bool = os.getenv("MEM0_ENABLED", os.getenv("MEMORY_ENABLED", "false")).lower() == "true"
         self.MEMORY_VECTOR_STORE_HOST: str = os.getenv("MEMORY_VECTOR_STORE_HOST", "localhost")
         self.MEMORY_VECTOR_STORE_PORT: int = int(os.getenv("MEMORY_VECTOR_STORE_PORT", "8000"))
-        # Example: 'chroma', 'qdrant', 'mem0'
-        self.MEMORY_PROVIDER: str = os.getenv("MEMORY_PROVIDER", "chroma")
+        self.MEMORY_PROVIDER: str = os.getenv("MEMORY_PROVIDER", os.getenv("MEMORY_BACKEND", "mem0_platform"))
+        self.MEM0_API_KEY: Optional[str] = os.getenv("MEM0_API_KEY")
+        self.MEM0_DEFAULT_AGENT_PREFIX: str = os.getenv("MEM0_DEFAULT_AGENT_PREFIX", "ami")
+        self.MEM0_SEARCH_LIMIT: int = int(os.getenv("MEM0_SEARCH_LIMIT", "6"))
 
         # -----------------------------------------------------------------------
         # SMS Configuration (Generic)

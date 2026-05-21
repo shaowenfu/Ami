@@ -1,6 +1,6 @@
 # Amiend
 
-Ami 的 FastAPI 后端服务，当前目标是为移动端快速迭代提供稳定的 API、Auth（鉴权）、SSE（Server-Sent Events 实时流通信）、LLM Gateway（模型网关）和部署链路。我们**全部采用 SSE 技术**来实现所有实时通信与流式数据推送需求。
+Ami 的 FastAPI 后端服务，当前目标是为移动端快速迭代提供稳定的 API、Auth（鉴权）、SSE（Server-Sent Events 实时流通信）、LLM Gateway（模型网关）和部署链路。采用 SSE 技术来实现所有实时通信与流式数据推送需求。
 
 ## 技术栈
 
@@ -22,7 +22,7 @@ cp .env.example .env
 
 docker compose up -d redis
 
-source venv/bin/activate
+source venv/bin/activate（Linux/WSL2） 或 .venv\Scripts\activate（Windows）
 pip install -r requirements.txt
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```

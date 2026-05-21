@@ -8,6 +8,9 @@
 - 2026-05-21：启动 M2 后端骨架。新增 Space / Invitation 模型、仓库、服务、路由和依赖注入，已注册 `/spaces` 路由。前端全局层与消息/SSE 事件流尚未接入。
 - 2026-05-21：完成 M3 后端基础。新增 Message 模型、仓库、服务与 `/spaces/{space_id}/messages` API；新增进程内 SSE Event Bus 与 `/spaces/{space_id}/events` 订阅端点。私聊事件按 `target_user_ids` 只推送给本人，群聊事件推送给空间订阅者。
 - 2026-05-21：启动 M4 基础链路。用户消息写入后通过 FastAPI `BackgroundTasks` 启动 Ami 回复任务，复用 SSE 推送 `message.delta`、`message.completed`、`message.failed`；当前仍使用基础 prompt，尚未接入 Mongo/Mem0 上下文构建器。
+- 2026-05-21：完成 M4 上下文接入。新增 `ChatContextBuilder` 作为唯一聊天上下文入口，Ami 回复前会读取当前 room_scope 的 Mongo 最近消息，并在 Mem0 启用时按私聊/群聊过滤器召回长期记忆；Mem0 不可用时自动退化为 Mongo 最近消息。
+- 2026-05-21：完成 M5 第一版 Mem0 Platform Adapter。`core/memory_adapter` 已支持 `mem0ai` 的 `MemoryClient`、`messages/user_id/agent_id/metadata/infer` 写入参数、`filters/top_k` 搜索参数，并保留 in-memory backend 供本地禁用 Mem0 时启动。
+- 2026-05-21：启动 M6 轻量记忆消化。Ami 回复完成后会在同一个后台任务内尝试把“用户消息 + Ami 回复”写入 Mem0，并发布 `memory.digest.completed` SSE；失败只记录日志，不影响消息持久化和回复链路。
 
 ## 背景
 
@@ -260,6 +263,8 @@ build_chat_context(
 ### M5：实现 Mem0 Adapter
 
 目标：把当前 in-memory placeholder 替换为真实 Mem0 Platform backend。
+
+当前状态：已完成第一版 backend contract 与 Mem0 Platform SDK wiring；已接入聊天回复后的轻量写入触发，后续仍需要 checkpoint、批量摘要和删除映射。
 
 新增依赖：
 
