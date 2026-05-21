@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import type { Href } from 'expo-router';
@@ -6,19 +6,26 @@ import { ArrowLeft, SendHorizontal } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ClayButton, ClayInput, ClaySurface, GeneratedAsset, SoftBackground } from '@/components/AppleClay';
-import { isBackendApiConfigured } from '@/lib/api/config';
+import { useAuthStore } from '@/store/useAuthStore';
 import { useSpaceStore } from '@/store/useSpaceStore';
 import { clay, clayText } from '@/theme/appleClay';
 
 export default function CreateSpaceScreen() {
-  const [phone, setPhone] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [message, setMessage] = useState('想邀请你和我一起建立一个 Ami 关系空间。');
   const isLoading = useSpaceStore((state) => state.isLoading);
   const error = useSpaceStore((state) => state.error);
   const createInvitation = useSpaceStore((state) => state.createInvitation);
+  const status = useAuthStore((state) => state.status);
+
+  useEffect(() => {
+    if (status === 'anonymous') {
+      router.replace('/auth/login' as Href);
+    }
+  }, [status]);
 
   const handleSubmit = async () => {
-    const invitation = await createInvitation(phone, message);
+    const invitation = await createInvitation(identifier, message);
     if (invitation) {
       router.push('/spaces' as Href);
     }
@@ -43,7 +50,7 @@ export default function CreateSpaceScreen() {
                     创建关系空间
                   </Text>
                   <Text className="mt-2 text-[15px] leading-6" style={clayText.body}>
-                    先用手机号发出邀请，对方接受后你们会进入同一个 Space。
+                    输入对方邮箱、手机号或用户名，对方接受后你们会进入同一个 Space。
                   </Text>
                 </View>
               </View>
@@ -51,9 +58,9 @@ export default function CreateSpaceScreen() {
 
             <View className="mt-6">
               <Text className="mb-2 ml-1 text-sm font-extrabold" style={clayText.title}>
-                对方手机号
+                对方账号
               </Text>
-              <ClayInput value={phone} onChangeText={setPhone} placeholder="输入已注册手机号" keyboardType="phone-pad" />
+              <ClayInput value={identifier} onChangeText={setIdentifier} placeholder="邮箱 / 手机号 / 用户名" autoCapitalize="none" />
 
               <Text className="mb-2 ml-1 mt-5 text-sm font-extrabold" style={clayText.title}>
                 邀请留言
@@ -75,15 +82,7 @@ export default function CreateSpaceScreen() {
               </View>
             ) : null}
 
-            {!isBackendApiConfigured() ? (
-              <View className="mt-5 rounded-[20px] px-4 py-3" style={{ backgroundColor: clay.color.lavenderSoft }}>
-                <Text className="text-sm font-bold" style={[clayText.body, { color: clay.color.lavenderDeep }]}>
-                  当前是演示模式。配置 `EXPO_PUBLIC_AMI_ACCESS_TOKEN` 后会发送真实邀请。
-                </Text>
-              </View>
-            ) : null}
-
-            <ClayButton className="mt-6" disabled={isLoading || !phone.trim()} icon={<SendHorizontal color={clay.color.white} size={18} />} onPress={handleSubmit}>
+            <ClayButton className="mt-6" disabled={isLoading || !identifier.trim()} icon={<SendHorizontal color={clay.color.white} size={18} />} onPress={handleSubmit}>
               {isLoading ? '发送中...' : '发送邀请'}
             </ClayButton>
           </ScrollView>

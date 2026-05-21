@@ -1,11 +1,12 @@
 import { useEffect } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { router } from 'expo-router';
+import type { Href } from 'expo-router';
 import { ArrowLeft, Check, MailOpen, X } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ClayButton, ClaySurface, SoftBackground } from '@/components/AppleClay';
-import { isBackendApiConfigured } from '@/lib/api/config';
+import { useAuthStore } from '@/store/useAuthStore';
 import { useSpaceStore } from '@/store/useSpaceStore';
 import { clay, clayText } from '@/theme/appleClay';
 
@@ -16,10 +17,18 @@ export default function InvitationsScreen() {
   const loadInvitations = useSpaceStore((state) => state.loadInvitations);
   const acceptInvitation = useSpaceStore((state) => state.acceptInvitation);
   const rejectInvitation = useSpaceStore((state) => state.rejectInvitation);
+  const status = useAuthStore((state) => state.status);
 
   useEffect(() => {
+    if (status === 'anonymous') {
+      router.replace('/auth/login' as Href);
+      return;
+    }
+    if (status !== 'authenticated') {
+      return;
+    }
     void loadInvitations();
-  }, [loadInvitations]);
+  }, [loadInvitations, status]);
 
   return (
     <SoftBackground>
@@ -37,17 +46,6 @@ export default function InvitationsScreen() {
           <Text className="mt-2 text-[15px] leading-6" style={clayText.body}>
             接受邀请后，双方会进入同一个关系空间；拒绝不会创建 Space。
           </Text>
-
-          {!isBackendApiConfigured() ? (
-            <ClaySurface className="mt-6 px-5 py-5" radius={30} tone="lavender">
-              <Text className="text-[18px] leading-6" style={clayText.display}>
-                当前是演示模式
-              </Text>
-              <Text className="mt-2 text-sm leading-5" style={clayText.body}>
-                配置后端 token 后，这里会显示真实收到的邀请。
-              </Text>
-            </ClaySurface>
-          ) : null}
 
           {error ? (
             <View className="mt-5 rounded-[20px] px-4 py-3" style={{ backgroundColor: '#FFF0F4' }}>
@@ -79,7 +77,7 @@ export default function InvitationsScreen() {
                   {invitation.message || '对方邀请你一起建立 Ami 关系空间。'}
                 </Text>
                 <Text className="mt-3 text-xs font-extrabold" style={[clayText.body, { color: clay.color.subtle }]}>
-                  发送至 {invitation.invitee_phone}
+                  发送至 {invitation.invitee_contact || invitation.invitee_phone}
                 </Text>
                 <View className="mt-4 flex-row gap-3">
                   <ClayButton
@@ -108,4 +106,3 @@ export default function InvitationsScreen() {
     </SoftBackground>
   );
 }
-

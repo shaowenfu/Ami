@@ -17,6 +17,7 @@ import { AMI_DEFAULT_SPACE_ID, isBackendApiConfigured } from '@/lib/api/config';
 import { useBackendChatStore } from '@/store/useBackendChatStore';
 import { useSpaceStore } from '@/store/useSpaceStore';
 import { useAmiMockStore } from '@/store/useAmiMockStore';
+import { useAuthStore } from '@/store/useAuthStore';
 import { clay, clayShadow, clayText } from '@/theme/appleClay';
 
 export default function ChatScreen() {
@@ -25,8 +26,9 @@ export default function ChatScreen() {
   const routeSpaceId = Array.isArray(params.spaceId) ? params.spaceId[0] : params.spaceId;
   const selectedSpaceId = useSpaceStore((state) => state.selectedSpaceId);
   const selectSpace = useSpaceStore((state) => state.selectSpace);
+  const authStatus = useAuthStore((state) => state.status);
   const activeSpaceId = routeSpaceId || selectedSpaceId || AMI_DEFAULT_SPACE_ID;
-  const backendChatEnabled = isBackendApiConfigured() && Boolean(activeSpaceId);
+  const backendChatEnabled = authStatus === 'authenticated' && isBackendApiConfigured() && Boolean(activeSpaceId);
   const mock = useAmiMockStore();
   const backendChatMode = useBackendChatStore((state) => state.chatMode);
   const backendMessages = useBackendChatStore((state) => state.messages);

@@ -6,7 +6,7 @@ import { Bell, ChevronRight, HeartHandshake, Inbox, Plus } from 'lucide-react-na
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ClayButton, ClaySurface, GeneratedAsset, SoftBackground } from '@/components/AppleClay';
-import { isBackendApiConfigured } from '@/lib/api/config';
+import { useAuthStore } from '@/store/useAuthStore';
 import { useSpaceStore } from '@/store/useSpaceStore';
 import { clay, clayShadow, clayText } from '@/theme/appleClay';
 
@@ -19,11 +19,21 @@ export default function SpacesScreen() {
   const loadSpaces = useSpaceStore((state) => state.loadSpaces);
   const loadInvitations = useSpaceStore((state) => state.loadInvitations);
   const selectSpace = useSpaceStore((state) => state.selectSpace);
+  const status = useAuthStore((state) => state.status);
+  const user = useAuthStore((state) => state.user);
+  const logout = useAuthStore((state) => state.logout);
 
   useEffect(() => {
+    if (status === 'anonymous') {
+      router.replace('/auth/login' as Href);
+      return;
+    }
+    if (status !== 'authenticated') {
+      return;
+    }
     void loadSpaces();
     void loadInvitations();
-  }, [loadInvitations, loadSpaces]);
+  }, [loadInvitations, loadSpaces, status]);
 
   const openSpace = (spaceId: string) => {
     selectSpace(spaceId);
@@ -49,15 +59,15 @@ export default function SpacesScreen() {
               </View>
             </View>
 
-            <ClaySurface className="mt-6 px-5 py-5" radius={30} tone={isBackendApiConfigured() ? 'celadon' : 'lavender'}>
+              <ClaySurface className="mt-6 px-5 py-5" radius={30} tone="celadon">
               <View className="flex-row items-center">
                 <GeneratedAsset asset="ami" size={72} rounded={24} />
                 <View className="ml-4 flex-1">
                   <Text className="text-xs font-extrabold" style={[clayText.title, { color: clay.color.lavenderDeep }]}>
-                    {isBackendApiConfigured() ? 'API 已配置' : '本地演示模式'}
+                    {status === 'authenticated' ? user?.email || user?.username : '正在验证会话'}
                   </Text>
                   <Text className="mt-1 text-[18px] leading-6" style={clayText.display}>
-                    {isBackendApiConfigured() ? '可以读取真实空间与消息' : '配置 .env 后切换到真实后端'}
+                    已启用安全会话与真实后端
                   </Text>
                 </View>
               </View>
@@ -135,6 +145,10 @@ export default function SpacesScreen() {
               {isLoading ? '同步中' : `${invitations.length} 条待处理`}
             </Text>
           </Pressable>
+
+          <ClayButton className="mt-5" variant="ghost" onPress={() => void logout()}>
+            退出登录
+          </ClayButton>
         </ScrollView>
       </SafeAreaView>
     </SoftBackground>

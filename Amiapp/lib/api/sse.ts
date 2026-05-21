@@ -1,4 +1,4 @@
-import { buildAuthHeaders } from './client';
+import { buildAuthHeaders, refreshStoredTokens } from './client';
 import { buildApiUrl } from './config';
 import type { SpaceEvent } from './types';
 
@@ -72,16 +72,29 @@ async function readSpaceEvents(
 ): Promise<{ lastEventId: string; retryMs?: number }> {
   const headers: Record<string, string> = {
     Accept: 'text/event-stream',
-    ...buildAuthHeaders(),
+    ...(await buildAuthHeaders()),
   };
   if (lastEventId) {
     headers['Last-Event-ID'] = lastEventId;
   }
 
-  const response = await fetch(buildApiUrl(`/spaces/${spaceId}/events`), {
+  let response = await fetch(buildApiUrl(`/spaces/${spaceId}/events`), {
     headers,
     signal,
   });
+
+  if (response.status === 401) {
+    const refreshed = await refreshStoredTokens();
+    if (refreshed) {
+      response = await fetch(buildApiUrl(`/spaces/${spaceId}/events`), {
+        headers: {
+          ...headers,
+          ...(await buildAuthHeaders()),
+        },
+        signal,
+      });
+    }
+  }
 
   if (!response.ok) {
     throw new Error(`SSE connection failed: ${response.status} ${response.statusText}`);

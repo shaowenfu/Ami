@@ -1,10 +1,18 @@
 import { Stack } from 'expo-router';
+import { useEffect } from 'react';
 import { View } from 'react-native';
 import '../styles/global.css';
 
+import { useAuthStore } from '@/store/useAuthStore';
 import { clay, clayShadow } from '@/theme/appleClay';
 
 export default function RootLayout() {
+  const bootstrap = useAuthStore((state) => state.bootstrap);
+
+  useEffect(() => {
+    void bootstrap();
+  }, [bootstrap]);
+
   return (
     <View className="flex-1 items-center" style={{ backgroundColor: clay.color.canvasDeep }}>
       <View

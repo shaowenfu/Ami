@@ -1,9 +1,11 @@
+import { useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Bell, ChevronRight, LockKeyhole, Moon, Sparkles } from 'lucide-react-native';
+import { Bell, ChevronRight, LockKeyhole, LogOut, Moon, ShieldAlert, Sparkles } from 'lucide-react-native';
 
-import { CheckPill, ClayButton, ClaySurface, GeneratedAsset, RelationshipAvatar, SoftBackground } from '@/components/AppleClay';
+import { CheckPill, ClayButton, ClayInput, ClayModal, ClaySurface, GeneratedAsset, RelationshipAvatar, SoftBackground } from '@/components/AppleClay';
 import { useAmiMockStore, type ProfileSetting } from '@/store/useAmiMockStore';
+import { useAuthStore } from '@/store/useAuthStore';
 import { clay, clayShadow, clayText } from '@/theme/appleClay';
 
 const settingIcon = {
@@ -13,6 +15,8 @@ const settingIcon = {
 } satisfies Record<ProfileSetting['id'], typeof Bell>;
 
 export default function ProfileScreen() {
+  const [deleteVisible, setDeleteVisible] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
   const {
     moods,
     todayMoodId,
@@ -24,7 +28,19 @@ export default function ProfileScreen() {
     setTodayMood,
     toggleProfileSetting,
   } = useAmiMockStore();
+  const user = useAuthStore((state) => state.user);
+  const authError = useAuthStore((state) => state.error);
+  const logout = useAuthStore((state) => state.logout);
+  const deleteAccount = useAuthStore((state) => state.deleteAccount);
   const todayMood = moods.find((mood) => mood.id === todayMoodId) ?? moods[0];
+
+  const submitDelete = async () => {
+    const ok = await deleteAccount({ password: deletePassword });
+    if (ok) {
+      setDeleteVisible(false);
+      setDeletePassword('');
+    }
+  };
 
   return (
     <SoftBackground>
@@ -170,6 +186,44 @@ export default function ProfileScreen() {
           <ClayButton className="mt-5" variant="secondary">
             编辑关系资料
           </ClayButton>
+
+          <ClaySurface className="mt-5 px-5 py-5" radius={34} tone="clear">
+            <Text className="text-xs font-extrabold" style={[clayText.title, { color: clay.color.lavenderDeep }]}>
+              账号安全
+            </Text>
+            <Text className="mt-2 text-[20px] leading-7" style={clayText.display}>
+              {user?.email || user?.username || '当前账号'}
+            </Text>
+            <Text className="mt-2 text-sm leading-5" style={clayText.body}>
+              Token 保存在客户端安全存储中，退出登录会清除本机 refresh token。
+            </Text>
+            {authError ? (
+              <Text className="mt-3 text-sm font-bold" style={[clayText.body, { color: clay.color.roseDeep }]}>
+                {authError}
+              </Text>
+            ) : null}
+            <View className="mt-4 flex-row gap-3">
+              <ClayButton className="flex-1" variant="secondary" icon={<LogOut color={clay.color.ink} size={16} />} onPress={() => void logout()}>
+                退出
+              </ClayButton>
+              <ClayButton className="flex-1" variant="ghost" icon={<ShieldAlert color={clay.color.roseDeep} size={16} />} onPress={() => setDeleteVisible(true)}>
+                注销
+              </ClayButton>
+            </View>
+          </ClaySurface>
+
+          <ClayModal visible={deleteVisible} title="注销账号" onClose={() => setDeleteVisible(false)}>
+            <Text className="text-sm leading-5" style={clayText.body}>
+              注销会停用当前账号，并撤销所有刷新令牌。
+            </Text>
+            <Text className="mb-2 ml-1 mt-5 text-sm font-extrabold" style={clayText.title}>
+              当前密码
+            </Text>
+            <ClayInput value={deletePassword} onChangeText={setDeletePassword} placeholder="输入密码确认注销" secureTextEntry />
+            <ClayButton className="mt-5" variant="ghost" disabled={!deletePassword} onPress={() => void submitDelete()}>
+              确认注销
+            </ClayButton>
+          </ClayModal>
         </ScrollView>
       </SafeAreaView>
     </SoftBackground>

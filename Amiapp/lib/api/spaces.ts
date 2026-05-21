@@ -13,7 +13,7 @@ export function listInboxInvitations() {
   return apiRequest<SpaceInvitationResponse[]>('/spaces/invitations/inbox');
 }
 
-export function createSpaceInvitation(payload: { phone: string; message?: string }) {
+export function createSpaceInvitation(payload: { identifier: string; message?: string }) {
   return apiRequest<SpaceInvitationResponse>('/spaces/invitations', {
     method: 'POST',
     body: payload,
@@ -31,4 +31,3 @@ export function rejectSpaceInvitation(invitationId: string) {
     method: 'POST',
   });
 }
-

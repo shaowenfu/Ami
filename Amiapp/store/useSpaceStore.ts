@@ -1,6 +1,5 @@
 import { create } from 'zustand';
 
-import { AMI_DEFAULT_SPACE_ID, isBackendApiConfigured } from '@/lib/api/config';
 import {
   acceptSpaceInvitation,
   createSpaceInvitation,
@@ -27,7 +26,7 @@ type SpaceStore = {
   error: string | null;
   loadSpaces: () => Promise<void>;
   loadInvitations: () => Promise<void>;
-  createInvitation: (phone: string, message: string) => Promise<SpaceInvitationResponse | null>;
+  createInvitation: (identifier: string, message: string) => Promise<SpaceInvitationResponse | null>;
   acceptInvitation: (invitationId: string) => Promise<void>;
   rejectInvitation: (invitationId: string) => Promise<void>;
   selectSpace: (spaceId: string) => void;
@@ -35,7 +34,7 @@ type SpaceStore = {
 
 const demoSpaces: SpaceSummary[] = [
   {
-    id: AMI_DEFAULT_SPACE_ID || 'demo-space',
+    id: 'demo-space',
     title: '小鹿和泽明',
     subtitle: 'Ami 正在守护你们的关系节奏',
     memberCount: 2,
@@ -43,7 +42,7 @@ const demoSpaces: SpaceSummary[] = [
     updatedAt: '今天',
   },
 ];
-const defaultSelectedSpaceId = AMI_DEFAULT_SPACE_ID || demoSpaces[0]?.id || null;
+const defaultSelectedSpaceId = demoSpaces[0]?.id || null;
 
 export const useSpaceStore = create<SpaceStore>((set) => ({
   spaces: demoSpaces,
@@ -52,11 +51,6 @@ export const useSpaceStore = create<SpaceStore>((set) => ({
   isLoading: false,
   error: null,
   loadSpaces: async () => {
-    if (!isBackendApiConfigured()) {
-      set({ spaces: demoSpaces, selectedSpaceId: defaultSelectedSpaceId });
-      return;
-    }
-
     set({ isLoading: true, error: null });
     try {
       const spaces = await listSpaces();
@@ -71,11 +65,6 @@ export const useSpaceStore = create<SpaceStore>((set) => ({
     }
   },
   loadInvitations: async () => {
-    if (!isBackendApiConfigured()) {
-      set({ invitations: [] });
-      return;
-    }
-
     try {
       const invitations = await listInboxInvitations();
       set({ invitations });
@@ -83,15 +72,10 @@ export const useSpaceStore = create<SpaceStore>((set) => ({
       set({ error: readErrorMessage(error) });
     }
   },
-  createInvitation: async (phone, message) => {
-    if (!isBackendApiConfigured()) {
-      set({ error: '需要先配置 EXPO_PUBLIC_AMI_ACCESS_TOKEN 才能创建真实邀请。' });
-      return null;
-    }
-
+  createInvitation: async (identifier, message) => {
     set({ isLoading: true, error: null });
     try {
-      const invitation = await createSpaceInvitation({ phone, message });
+      const invitation = await createSpaceInvitation({ identifier, message });
       set((state) => ({
         invitations: upsertInvitation(state.invitations, invitation),
         isLoading: false,
@@ -103,11 +87,6 @@ export const useSpaceStore = create<SpaceStore>((set) => ({
     }
   },
   acceptInvitation: async (invitationId) => {
-    if (!isBackendApiConfigured()) {
-      set({ error: '需要先配置 EXPO_PUBLIC_AMI_ACCESS_TOKEN 才能处理真实邀请。' });
-      return;
-    }
-
     set({ isLoading: true, error: null });
     try {
       const invitation = await acceptSpaceInvitation(invitationId);
@@ -124,11 +103,6 @@ export const useSpaceStore = create<SpaceStore>((set) => ({
     }
   },
   rejectInvitation: async (invitationId) => {
-    if (!isBackendApiConfigured()) {
-      set({ error: '需要先配置 EXPO_PUBLIC_AMI_ACCESS_TOKEN 才能处理真实邀请。' });
-      return;
-    }
-
     set({ isLoading: true, error: null });
     try {
       const invitation = await rejectSpaceInvitation(invitationId);

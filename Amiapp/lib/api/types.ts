@@ -3,6 +3,35 @@ export type ResolvedRoomScope = 'SHARED' | `PRIVATE:${string}`;
 export type MessageSenderType = 'USER' | 'AGENT' | 'SYSTEM';
 export type SpaceStatus = 'ACTIVE' | 'DISSOLVED';
 export type SpaceInvitationStatus = 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'CANCELLED';
+export type VerificationScene = 'register' | 'login' | 'account_delete';
+
+export type TokenPair = {
+  token_type: string;
+  access_token: string;
+  refresh_token: string;
+  access_token_expires_at: string;
+  refresh_token_expires_at: string;
+};
+
+export type UserResponse = {
+  id: string;
+  username: string;
+  email: string;
+  phone: string | null;
+  preferred_name: string;
+  is_active: boolean;
+  email_verified_at: string | null;
+  phone_verified_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type EmailVerificationResponse = {
+  outcome: 'login' | 'ticket';
+  token_pair?: TokenPair | null;
+  verification_ticket?: string | null;
+  ticket_expires_at?: string | null;
+};
 
 export type AgentProfile = {
   name: string;
@@ -30,6 +59,7 @@ export type SpaceInvitationResponse = {
   initiator_user_id: string;
   invitee_user_id: string;
   invitee_phone: string;
+  invitee_contact: string;
   message: string;
   status: SpaceInvitationStatus;
   space_id: string | null;
@@ -82,4 +112,3 @@ export type MessageEventData = {
   chunk?: string;
   error?: string;
 };
-

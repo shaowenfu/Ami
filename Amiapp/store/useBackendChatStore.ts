@@ -1,6 +1,5 @@
 import { create } from 'zustand';
 
-import { AMI_CURRENT_USER_ID } from '@/lib/api/config';
 import { createMessage, listMessages, openSpaceEventStream } from '@/lib/api';
 import type {
   MessageEventData,
@@ -11,6 +10,7 @@ import type {
   SpaceEventConnectionState,
 } from '@/lib/api';
 import type { ChatMessage, ChatMode, MessageRole } from './useAmiMockStore';
+import { useAuthStore } from './useAuthStore';
 
 type BackendChatStore = {
   chatMode: ChatMode;
@@ -155,20 +155,22 @@ function mapBackendMessage(message: MessageResponse): ChatMessage {
 }
 
 function roleForMessage(message: MessageResponse): MessageRole {
+  const currentUserId = useAuthStore.getState().user?.id;
   if (message.sender_type === 'AGENT') {
     return 'agent';
   }
-  if (message.sender_id && AMI_CURRENT_USER_ID && message.sender_id !== AMI_CURRENT_USER_ID) {
+  if (message.sender_id && currentUserId && message.sender_id !== currentUserId) {
     return 'partner';
   }
   return 'me';
 }
 
 function senderForMessage(message: MessageResponse) {
+  const currentUserId = useAuthStore.getState().user?.id;
   if (message.sender_type === 'AGENT') {
     return 'Ami';
   }
-  if (message.sender_id && AMI_CURRENT_USER_ID && message.sender_id !== AMI_CURRENT_USER_ID) {
+  if (message.sender_id && currentUserId && message.sender_id !== currentUserId) {
     return '对方';
   }
   return '我';
