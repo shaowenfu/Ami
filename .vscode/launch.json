@@ -1,0 +1,29 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Ami Backend (FastAPI)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/Amiend/main.py",
+      "cwd": "${workspaceFolder}/Amiend",
+      "python": "${workspaceFolder}/Amiend/.venv/Scripts/python.exe",
+      "console": "integratedTerminal",
+      "subProcess": true,
+      "envFile": "${workspaceFolder}/Amiend/.env"
+    },
+    {
+      "name": "Ami Frontend (Expo)",
+      "type": "expo",
+      "request": "launch",
+      "projectRoot": "${workspaceFolder}/Amiapp"
+    },
+    {
+      "name": "Ami Frontend (Chrome Web)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:8081",
+      "webRoot": "${workspaceFolder}/Amiapp"
+    }
+  ]
+}
