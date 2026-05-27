@@ -31,3 +31,9 @@ export function rejectSpaceInvitation(invitationId: string) {
     method: 'POST',
   });
 }
+
+export function deleteSpace(spaceId: string) {
+  return apiRequest<void>(`/spaces/${spaceId}`, {
+    method: 'DELETE',
+  });
+}

@@ -1,4 +1,4 @@
-import { PropsWithChildren, ReactNode } from 'react';
+import { PropsWithChildren, ReactNode, useState } from 'react';
 import {
   Image,
   Modal,
@@ -10,7 +10,7 @@ import {
   View,
   ViewStyle,
 } from 'react-native';
-import { Check, X } from 'lucide-react-native';
+import { Check, X, Eye, EyeOff } from 'lucide-react-native';
 
 import { clay, clayShadow, clayText } from '@/theme/appleClay';
 
@@ -127,18 +127,37 @@ export function ClayButton({ children, onPress, variant = 'primary', className =
   );
 }
 
-export function ClayInput({ className = '', style, ...props }: TextInputProps & { className?: string; style?: ViewStyle }) {
+export function ClayInput({ className = '', style, secureTextEntry, ...props }: TextInputProps & { className?: string; style?: ViewStyle }) {
+  const [isSecure, setIsSecure] = useState(!!secureTextEntry);
+
   return (
     <View
-      className={`min-h-[50px] justify-center rounded-[22px] px-4 ${className}`}
+      className={`min-h-[50px] flex-row items-center rounded-[22px] ${secureTextEntry ? 'pl-4 pr-2' : 'px-4'} ${className}`}
       style={[{ backgroundColor: '#EFE9F5' }, clayShadow.pressed, style]}
     >
       <TextInput
         placeholderTextColor={clay.color.subtle}
-        className="text-[16px]"
+        className="flex-1 text-[16px]"
         style={[clayText.body, { color: clay.color.ink, padding: 0 }]}
+        secureTextEntry={isSecure}
         {...props}
       />
+      {secureTextEntry && (
+        <Pressable
+          onPress={() => setIsSecure(!isSecure)}
+          className="h-10 w-10 items-center justify-center rounded-full"
+          style={({ pressed }) => [
+            { transform: [{ scale: pressed ? 0.92 : 1 }] }
+          ]}
+          hitSlop={8}
+        >
+          {isSecure ? (
+            <EyeOff color={clay.color.subtle} size={20} />
+          ) : (
+            <Eye color={clay.color.lavenderDeep} size={20} />
+          )}
+        </Pressable>
+      )}
     </View>
   );
 }

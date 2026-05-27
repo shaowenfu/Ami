@@ -15,6 +15,9 @@ import { useAuthStore } from './useAuthStore';
 type BackendChatStore = {
   chatMode: ChatMode;
   messages: ChatMessage[];
+  messagesByRoom: Record<string, ChatMessage[]>;
+  loadedRooms: Record<string, boolean>;
+  pendingAgentRooms: Record<string, boolean>;
   isLoading: boolean;
   isSending: boolean;
   isStreaming: boolean;
@@ -39,6 +42,9 @@ let activeConnection: SpaceEventConnection | null = null;
 export const useBackendChatStore = create<BackendChatStore>((set, get) => ({
   chatMode: 'group',
   messages: [],
+  messagesByRoom: {},
+  loadedRooms: {},
+  pendingAgentRooms: {},
   isLoading: false,
   isSending: false,
   isStreaming: false,
@@ -46,20 +52,33 @@ export const useBackendChatStore = create<BackendChatStore>((set, get) => ({
   error: null,
   activeSpaceId: null,
   setChatMode: (mode) => {
-    set({ chatMode: mode });
-    const { activeSpaceId } = get();
+    const { activeSpaceId, messagesByRoom } = get();
+    const roomKey = activeSpaceId ? cacheKey(activeSpaceId, mode) : null;
+    set({
+      chatMode: mode,
+      messages: roomKey ? messagesByRoom[roomKey] ?? [] : [],
+    });
     if (activeSpaceId) {
-      void get().loadMessages(activeSpaceId);
+      const key = cacheKey(activeSpaceId, mode);
+      if (!get().loadedRooms[key]) {
+        void get().loadMessages(activeSpaceId);
+      }
     }
   },
   loadMessages: async (spaceId) => {
-    set({ isLoading: true, activeSpaceId: spaceId, error: null });
+    const mode = get().chatMode;
+    const key = cacheKey(spaceId, mode);
+    const cached = get().messagesByRoom[key] ?? [];
+    set({ isLoading: !get().loadedRooms[key], activeSpaceId: spaceId, messages: cached, error: null });
     try {
-      const response = await listMessages(spaceId, roomScopeForMode(get().chatMode));
-      set({
-        messages: response.map(mapBackendMessage),
+      const response = await listMessages(spaceId, roomScopeForMode(mode));
+      const messages = response.map(mapBackendMessage);
+      set((state) => ({
+        messagesByRoom: { ...state.messagesByRoom, [key]: messages },
+        loadedRooms: { ...state.loadedRooms, [key]: true },
+        messages: state.activeSpaceId === spaceId && state.chatMode === mode ? messages : state.messages,
         isLoading: false,
-      });
+      }));
     } catch (error) {
       set({ error: readErrorMessage(error), isLoading: false });
     }
@@ -70,19 +89,54 @@ export const useBackendChatStore = create<BackendChatStore>((set, get) => ({
       return;
     }
 
-    set({ isSending: true, error: null });
+    const mode = get().chatMode;
+    const scope = roomScopeForMode(mode);
+    const key = cacheKey(spaceId, mode);
+    const optimisticId = `optimistic:${Date.now()}`;
+    const optimisticMessage: ChatMessage = {
+      id: optimisticId,
+      role: 'me',
+      sender: '我',
+      content: text,
+      createdAt: formatMessageTime(new Date().toISOString()),
+      reactionCount: 0,
+      reacted: false,
+    };
+
+    set((state) => ({
+      isSending: true,
+      error: null,
+      messages: [...(state.messagesByRoom[key] ?? state.messages), optimisticMessage],
+      messagesByRoom: {
+        ...state.messagesByRoom,
+        [key]: [...(state.messagesByRoom[key] ?? state.messages), optimisticMessage],
+      },
+      pendingAgentRooms: { ...state.pendingAgentRooms, [key]: true },
+    }));
     try {
       const message = await createMessage(spaceId, {
-        room_scope: roomScopeForMode(get().chatMode),
+        room_scope: scope,
         content: text,
       });
       set((state) => ({
-        messages: upsertMessage(state.messages, mapBackendMessage(message)),
+        messages:
+          state.activeSpaceId === spaceId && state.chatMode === mode
+            ? replaceOrUpsertMessage(state.messages, optimisticId, mapBackendMessage(message))
+            : state.messages,
+        messagesByRoom: {
+          ...state.messagesByRoom,
+          [key]: replaceOrUpsertMessage(state.messagesByRoom[key] ?? [], optimisticId, mapBackendMessage(message)),
+        },
+        loadedRooms: { ...state.loadedRooms, [key]: true },
         isSending: false,
-        isStreaming: true,
+        isStreaming: state.pendingAgentRooms[key] ?? true,
       }));
     } catch (error) {
-      set({ error: readErrorMessage(error), isSending: false });
+      set((state) => ({
+        error: readErrorMessage(error),
+        isSending: false,
+        pendingAgentRooms: { ...state.pendingAgentRooms, [key]: false },
+      }));
     }
   },
   connectEvents: (spaceId) => {
@@ -111,8 +165,14 @@ function handleSpaceEvent(
     if (!isCurrentRoomEvent(data, get().chatMode)) {
       return;
     }
+    const key = cacheKey(get().activeSpaceId ?? data.space_id, modeForRoomScope(data.room_scope));
     set((state) => ({
       messages: upsertStreamingMessage(state.messages, data),
+      messagesByRoom: {
+        ...state.messagesByRoom,
+        [key]: upsertStreamingMessage(state.messagesByRoom[key] ?? [], data),
+      },
+      pendingAgentRooms: { ...state.pendingAgentRooms, [key]: true },
       isStreaming: true,
     }));
     return;
@@ -123,11 +183,22 @@ function handleSpaceEvent(
     if (!data.message || !isCurrentRoomEvent(data, get().chatMode)) {
       return;
     }
+    const message = data.message as MessageResponse;
+    const key = cacheKey(get().activeSpaceId ?? message.space_id, modeForRoomScope(data.room_scope));
     set((state) => ({
       messages: upsertMessage(
         state.messages.filter((message) => message.id !== streamingMessageId(data.room_scope)),
-        mapBackendMessage(data.message as MessageResponse),
+        mapBackendMessage(message),
       ),
+      messagesByRoom: {
+        ...state.messagesByRoom,
+        [key]: upsertMessage(
+          (state.messagesByRoom[key] ?? []).filter((message) => message.id !== streamingMessageId(data.room_scope)),
+          mapBackendMessage(message),
+        ),
+      },
+      loadedRooms: { ...state.loadedRooms, [key]: true },
+      pendingAgentRooms: message.sender_type === 'AGENT' ? { ...state.pendingAgentRooms, [key]: false } : state.pendingAgentRooms,
       isStreaming: event.event === 'message.completed' ? false : state.isStreaming,
     }));
     return;
@@ -138,7 +209,12 @@ function handleSpaceEvent(
     if (!isCurrentRoomEvent(data, get().chatMode)) {
       return;
     }
-    set({ error: data.error ?? 'Ami 回复失败', isStreaming: false });
+    const key = cacheKey(get().activeSpaceId ?? data.space_id, modeForRoomScope(data.room_scope));
+    set((state) => ({
+      error: data.error ?? 'Ami 回复失败',
+      isStreaming: false,
+      pendingAgentRooms: { ...state.pendingAgentRooms, [key]: false },
+    }));
   }
 }
 
@@ -184,6 +260,16 @@ function upsertMessage(messages: ChatMessage[], next: ChatMessage) {
   return [...messages, next];
 }
 
+function replaceOrUpsertMessage(messages: ChatMessage[], optimisticId: string, next: ChatMessage) {
+  const replaced = messages.some((message) => message.id === optimisticId);
+  if (replaced) {
+    return messages
+      .filter((message) => message.id === optimisticId || message.id !== next.id)
+      .map((message) => (message.id === optimisticId ? next : message));
+  }
+  return upsertMessage(messages, next);
+}
+
 function upsertStreamingMessage(messages: ChatMessage[], data: MessageEventData) {
   const id = streamingMessageId(data.room_scope);
   const chunk = data.chunk ?? '';
@@ -208,6 +294,14 @@ function roomScopeForMode(mode: ChatMode): RoomScopeInput {
   return mode === 'group' ? 'SHARED' : 'PRIVATE_SELF';
 }
 
+function modeForRoomScope(roomScope: string): ChatMode {
+  return roomScope === 'SHARED' ? 'group' : 'agent';
+}
+
+function cacheKey(spaceId: string, mode: ChatMode) {
+  return `${spaceId}:${mode}`;
+}
+
 function isCurrentRoomEvent(data: MessageEventData, mode: ChatMode) {
   const expected = roomScopeForMode(mode);
   if (expected === 'SHARED') {
@@ -221,7 +315,12 @@ function formatMessageTime(value: string) {
   if (Number.isNaN(date.getTime())) {
     return '';
   }
-  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+  return new Intl.DateTimeFormat('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: 'Asia/Shanghai',
+  }).format(date);
 }
 
 function readErrorMessage(error: unknown) {

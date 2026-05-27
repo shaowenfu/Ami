@@ -8,9 +8,15 @@ import {
   loginWithPassword,
   logout as logoutRequest,
   registerWithEmail,
+  changePassword as changePasswordRequest,
   sendEmailCode as sendEmailCodeRequest,
+  sendSmsCode as sendSmsCodeRequest,
   setUnauthorizedHandler,
+  updateContact as updateContactRequest,
+  updateMe,
+  uploadAvatar as uploadAvatarRequest,
   verifyEmailCode,
+  verifySmsCode,
 } from '@/lib/api';
 import { clearStoredTokens, getRefreshToken, saveTokens } from '@/lib/auth/tokenStore';
 import type { UserResponse, VerificationScene } from '@/lib/api/types';
@@ -31,6 +37,11 @@ type AuthStore = {
   error: string | null;
   bootstrap: () => Promise<void>;
   sendEmailCode: (email: string, scene: VerificationScene) => Promise<void>;
+  sendSmsCode: (phone: string, scene: VerificationScene) => Promise<void>;
+  updateProfile: (payload: { preferred_name?: string; avatar_url?: string }) => Promise<boolean>;
+  uploadAvatar: (file: { uri: string; name: string; type: string }) => Promise<boolean>;
+  updateContact: (payload: { email?: string; code?: string; phone?: string }) => Promise<boolean>;
+  changePassword: (payload: { newPassword: string; oldPassword?: string; code?: string }) => Promise<boolean>;
   login: (identifier: string, password: string) => Promise<boolean>;
   loginWithEmailCode: (email: string, code: string) => Promise<boolean>;
   register: (input: RegisterInput) => Promise<boolean>;
@@ -70,6 +81,102 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     } catch (error) {
       set({ error: readErrorMessage(error) });
       throw error;
+    }
+  },
+  sendSmsCode: async (phone, scene) => {
+    set({ error: null });
+    try {
+      await sendSmsCodeRequest({ phone: phone.trim(), scene });
+    } catch (error) {
+      set({ error: readErrorMessage(error) });
+      throw error;
+    }
+  },
+  updateProfile: async (payload) => {
+    set({ error: null });
+    try {
+      const user = await updateMe(payload);
+      set({ user, error: null });
+      return true;
+    } catch (error) {
+      set({ error: readErrorMessage(error) });
+      return false;
+    }
+  },
+  uploadAvatar: async (file) => {
+    set({ error: null });
+    try {
+      const user = await uploadAvatarRequest(file);
+      set({ user, error: null });
+      return true;
+    } catch (error) {
+      set({ error: readErrorMessage(error) });
+      return false;
+    }
+  },
+  updateContact: async (payload) => {
+    set({ error: null });
+    try {
+      const nextPayload: {
+        email?: string;
+        email_verification_ticket?: string;
+        phone?: string;
+        phone_verification_ticket?: string;
+      } = {};
+      if (payload.email) {
+        const verified = await verifyEmailCode({ email: payload.email.trim(), code: (payload.code ?? '').trim(), scene: 'register' });
+        if (!verified.verification_ticket) {
+          throw new Error('邮箱验证未返回绑定凭证。');
+        }
+        nextPayload.email = payload.email.trim();
+        nextPayload.email_verification_ticket = verified.verification_ticket;
+      }
+      if (payload.phone) {
+        const verified = await verifySmsCode({ phone: payload.phone.trim(), code: (payload.code ?? '').trim(), scene: 'register' });
+        if (!verified.verification_ticket) {
+          throw new Error('短信验证未返回绑定凭证。');
+        }
+        nextPayload.phone = payload.phone.trim();
+        nextPayload.phone_verification_ticket = verified.verification_ticket;
+      }
+      const user = await updateContactRequest(nextPayload);
+      set({ user, error: null });
+      return true;
+    } catch (error) {
+      set({ error: readErrorMessage(error) });
+      return false;
+    }
+  },
+  changePassword: async (payload) => {
+    set({ error: null });
+    try {
+      const user = get().user;
+      if (!user) {
+        throw new Error('当前用户不存在。');
+      }
+      if (payload.oldPassword) {
+        await changePasswordRequest({
+          old_password: payload.oldPassword,
+          new_password: payload.newPassword,
+        });
+      } else {
+        const ticket = user.email
+          ? (await verifyEmailCode({ email: user.email, code: (payload.code ?? '').trim(), scene: 'password_change' })).verification_ticket
+          : user.phone
+            ? (await verifySmsCode({ phone: user.phone, code: (payload.code ?? '').trim(), scene: 'password_change' })).verification_ticket
+            : null;
+        if (!ticket) {
+          throw new Error('验证码未返回修改密码凭证。');
+        }
+        await changePasswordRequest({
+          verification_ticket: ticket,
+          new_password: payload.newPassword,
+        });
+      }
+      return true;
+    } catch (error) {
+      set({ error: readErrorMessage(error) });
+      return false;
     }
   },
   login: async (identifier, password) => {

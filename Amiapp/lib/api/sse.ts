@@ -97,7 +97,7 @@ async function readSpaceEvents(
   }
 
   if (!response.ok) {
-    throw new Error(`SSE connection failed: ${response.status} ${response.statusText}`);
+    throw new Error('消息同步暂时断开，正在尝试恢复。');
   }
 
   options.onConnectionState?.('open');

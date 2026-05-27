@@ -1,8 +1,8 @@
-import { useEffect } from 'react';
+import { useCallback, useEffect } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import type { Href } from 'expo-router';
-import { Bell, ChevronRight, HeartHandshake, Inbox, Plus } from 'lucide-react-native';
+import { Bell, ChevronRight, HeartHandshake, Inbox, Plus, Sparkles, UserRound } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ClayButton, ClaySurface, GeneratedAsset, SoftBackground } from '@/components/AppleClay';
@@ -21,7 +21,7 @@ export default function SpacesScreen() {
   const selectSpace = useSpaceStore((state) => state.selectSpace);
   const status = useAuthStore((state) => state.status);
   const user = useAuthStore((state) => state.user);
-  const logout = useAuthStore((state) => state.logout);
+  const displayName = user?.preferred_name || user?.username || '你';
 
   useEffect(() => {
     if (status === 'anonymous') {
@@ -35,6 +35,16 @@ export default function SpacesScreen() {
     void loadInvitations();
   }, [loadInvitations, loadSpaces, status]);
 
+  useFocusEffect(
+    useCallback(() => {
+      if (status !== 'authenticated') {
+        return;
+      }
+      void loadSpaces();
+      void loadInvitations();
+    }, [loadInvitations, loadSpaces, status]),
+  );
+
   const openSpace = (spaceId: string) => {
     selectSpace(spaceId);
     router.push(`/space/${spaceId}/chat` as Href);
@@ -46,28 +56,47 @@ export default function SpacesScreen() {
         <ScrollView className="flex-1" contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 34 }} showsVerticalScrollIndicator={false}>
           <View className="pb-4 pt-2">
             <View className="flex-row items-center justify-between">
-              <View>
+              <View className="flex-1 pr-4">
                 <Text className="text-[34px] leading-10" style={clayText.display}>
                   关系空间
                 </Text>
                 <Text className="mt-2 text-[15px] leading-6" style={clayText.body}>
-                  从全局层进入不同关系，私聊和群聊会在空间内保持隔离。
+                  每段关系都有自己的 Ami、聊天和共同记忆。
                 </Text>
               </View>
-              <View className="h-12 w-12 items-center justify-center rounded-full" style={[{ backgroundColor: clay.color.card }, clayShadow.soft]}>
-                <Bell color={clay.color.lavenderDeep} size={22} strokeWidth={2.5} />
+              <View className="flex-row gap-2">
+                <Pressable
+                  onPress={() => router.push('/spaces/invitations' as Href)}
+                  className="h-12 w-12 items-center justify-center rounded-full"
+                  style={({ pressed }) => [
+                    { backgroundColor: clay.color.card, transform: [{ scale: pressed ? 0.96 : 1 }] },
+                    clayShadow.soft,
+                  ]}
+                >
+                  <Bell color={clay.color.lavenderDeep} size={22} strokeWidth={2.5} />
+                </Pressable>
+                <Pressable
+                  onPress={() => router.push('/profile' as Href)}
+                  className="h-12 w-12 items-center justify-center rounded-full"
+                  style={({ pressed }) => [
+                    { backgroundColor: clay.color.card, transform: [{ scale: pressed ? 0.96 : 1 }] },
+                    clayShadow.soft,
+                  ]}
+                >
+                  <UserRound color={clay.color.celadonDeep} size={22} strokeWidth={2.5} />
+                </Pressable>
               </View>
             </View>
 
-              <ClaySurface className="mt-6 px-5 py-5" radius={30} tone="celadon">
+            <ClaySurface className="mt-6 px-5 py-5" radius={30} tone="celadon">
               <View className="flex-row items-center">
                 <GeneratedAsset asset="ami" size={72} rounded={24} />
                 <View className="ml-4 flex-1">
                   <Text className="text-xs font-extrabold" style={[clayText.title, { color: clay.color.lavenderDeep }]}>
-                    {status === 'authenticated' ? user?.email || user?.username : '正在验证会话'}
+                    {status === 'authenticated' ? `欢迎回来，${displayName}` : '正在为你整理入口'}
                   </Text>
                   <Text className="mt-1 text-[18px] leading-6" style={clayText.display}>
-                    已启用安全会话与真实后端
+                    选择一段关系，Ami 会带着对应的上下文继续陪你聊。
                   </Text>
                 </View>
               </View>
@@ -97,6 +126,23 @@ export default function SpacesScreen() {
           ) : null}
 
           <View className="mt-3">
+            {!isLoading && spaces.length === 0 ? (
+              <ClaySurface className="mb-4 px-5 py-6" radius={30} tone="sky">
+                <View className="flex-row items-center">
+                  <View className="h-14 w-14 items-center justify-center rounded-[22px]" style={{ backgroundColor: clay.color.card }}>
+                    <Sparkles color={clay.color.lavenderDeep} size={25} strokeWidth={2.5} />
+                  </View>
+                  <View className="ml-4 flex-1">
+                    <Text className="text-[20px] leading-7" style={clayText.display}>
+                      先邀请一个重要的人
+                    </Text>
+                    <Text className="mt-1 text-sm leading-5" style={clayText.body}>
+                      对方接受后，这里会出现你们的聊天、Ami 记忆和关系工具。
+                    </Text>
+                  </View>
+                </View>
+              </ClaySurface>
+            ) : null}
             {spaces.map((space) => {
               const selected = selectedSpaceId === space.id;
               return (
@@ -145,10 +191,6 @@ export default function SpacesScreen() {
               {isLoading ? '同步中' : `${invitations.length} 条待处理`}
             </Text>
           </Pressable>
-
-          <ClayButton className="mt-5" variant="ghost" onPress={() => void logout()}>
-            退出登录
-          </ClayButton>
         </ScrollView>
       </SafeAreaView>
     </SoftBackground>

@@ -30,6 +30,13 @@ export default function InvitationsScreen() {
     void loadInvitations();
   }, [loadInvitations, status]);
 
+  const handleAccept = async (invitationId: string) => {
+    const invitation = await acceptInvitation(invitationId);
+    if (invitation?.space_id) {
+      router.replace('/spaces' as Href);
+    }
+  };
+
   return (
     <SoftBackground>
       <SafeAreaView className="flex-1">
@@ -91,9 +98,10 @@ export default function InvitationsScreen() {
                   </ClayButton>
                   <ClayButton
                     className="flex-1"
-                    icon={<Check color={clay.color.white} size={16} />}
+                    variant="tonal"
+                    icon={<Check color={clay.color.lavenderDeep} size={16} />}
                     disabled={isLoading}
-                    onPress={() => void acceptInvitation(invitation.id)}
+                    onPress={() => void handleAccept(invitation.id)}
                   >
                     接受
                   </ClayButton>

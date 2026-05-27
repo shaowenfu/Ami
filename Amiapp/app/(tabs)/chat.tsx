@@ -1,15 +1,14 @@
-import { useEffect, useMemo, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Animated, Easing, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Text, View } from 'react-native';
+import { router, useLocalSearchParams } from 'expo-router';
+import type { Href } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Heart, MoreHorizontal, SendHorizontal, Sparkles } from 'lucide-react-native';
+import { Heart, MoreHorizontal, SendHorizontal } from 'lucide-react-native';
 
 import {
-  ClayButton,
   ClayInput,
   ClaySegmentedControl,
   ClaySurface,
-  GeneratedAsset,
   RelationshipAvatar,
   SoftBackground,
 } from '@/components/AppleClay';
@@ -22,6 +21,8 @@ import { clay, clayShadow, clayText } from '@/theme/appleClay';
 
 export default function ChatScreen() {
   const [draft, setDraft] = useState('');
+  const [menuVisible, setMenuVisible] = useState(false);
+  const scrollRef = useRef<ScrollView | null>(null);
   const params = useLocalSearchParams<{ spaceId?: string | string[] }>();
   const routeSpaceId = Array.isArray(params.spaceId) ? params.spaceId[0] : params.spaceId;
   const selectedSpaceId = useSpaceStore((state) => state.selectedSpaceId);
@@ -32,10 +33,8 @@ export default function ChatScreen() {
   const mock = useAmiMockStore();
   const backendChatMode = useBackendChatStore((state) => state.chatMode);
   const backendMessages = useBackendChatStore((state) => state.messages);
-  const backendIsSending = useBackendChatStore((state) => state.isSending);
-  const backendIsStreaming = useBackendChatStore((state) => state.isStreaming);
+  const backendPendingAgentRooms = useBackendChatStore((state) => state.pendingAgentRooms);
   const backendError = useBackendChatStore((state) => state.error);
-  const backendConnectionState = useBackendChatStore((state) => state.connectionState);
   const backendSetChatMode = useBackendChatStore((state) => state.setChatMode);
   const backendLoadMessages = useBackendChatStore((state) => state.loadMessages);
   const backendSendMessage = useBackendChatStore((state) => state.sendMessage);
@@ -48,7 +47,7 @@ export default function ChatScreen() {
     ? {
         chatMode: backendChatMode,
         messages: backendMessages,
-        isTyping: backendIsSending || backendIsStreaming,
+        isTyping: Boolean(activeSpaceId ? backendPendingAgentRooms[`${activeSpaceId}:${backendChatMode}`] : false),
       }
     : {
         chatMode: mock.chatMode,
@@ -57,6 +56,10 @@ export default function ChatScreen() {
       };
 
   const room = getRoomPresentation(chatMode);
+  const visibleMessages = useMemo(
+    () => messages.filter((message) => chatMode === 'group' || message.role !== 'partner'),
+    [chatMode, messages],
+  );
 
   useEffect(() => {
     if (!backendChatEnabled || !activeSpaceId) {
@@ -70,10 +73,9 @@ export default function ChatScreen() {
     return backendConnectEvents(activeSpaceId);
   }, [activeSpaceId, backendChatEnabled, backendConnectEvents, backendLoadMessages, routeSpaceId, selectSpace]);
 
-  const visibleMessages = useMemo(
-    () => messages.filter((message) => chatMode === 'group' || message.role !== 'partner'),
-    [chatMode, messages],
-  );
+  useEffect(() => {
+    requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
+  }, [visibleMessages.length, isTyping, chatMode]);
 
   const handleSend = (text = draft) => {
     if (backendChatEnabled && activeSpaceId) {
@@ -109,7 +111,14 @@ export default function ChatScreen() {
                   </Text>
                 </View>
               </View>
-              <Pressable className="h-11 w-11 items-center justify-center rounded-full" style={{ backgroundColor: clay.color.card }}>
+              <Pressable
+                onPress={() => setMenuVisible(true)}
+                className="h-11 w-11 items-center justify-center rounded-full"
+                style={({ pressed }) => [
+                  { backgroundColor: clay.color.card, transform: [{ scale: pressed ? 0.96 : 1 }] },
+                  clayShadow.soft,
+                ]}
+              >
                 <MoreHorizontal color={clay.color.ink} size={24} strokeWidth={2.6} />
               </Pressable>
             </View>
@@ -134,16 +143,42 @@ export default function ChatScreen() {
               </Text>
             </View>
 
-            {backendChatEnabled ? (
-              <View className="mt-3 rounded-[20px] px-4 py-3" style={{ backgroundColor: backendError ? '#FFF0F4' : '#EFFAF6' }}>
-                <Text className="text-xs font-extrabold" style={[clayText.body, { color: backendError ? clay.color.roseDeep : clay.color.celadonDeep }]}>
-                  {backendError ? `连接提示：${backendError}` : `后端消息与 SSE 事件流：${connectionStateLabel(backendConnectionState)}`}
+            {backendChatEnabled && backendError ? (
+              <View className="mt-3 rounded-[20px] px-4 py-3" style={{ backgroundColor: '#FFF0F4' }}>
+                <Text className="text-xs font-extrabold" style={[clayText.body, { color: clay.color.roseDeep }]}>
+                  {backendError}
                 </Text>
               </View>
             ) : null}
           </View>
 
+          <Modal transparent visible={menuVisible} animationType="fade" onRequestClose={() => setMenuVisible(false)}>
+            <Pressable className="flex-1 items-end bg-[#302D36]/20 px-5 pt-20" onPress={() => setMenuVisible(false)}>
+              <ClaySurface className="w-56 px-3 py-3" radius={24}>
+                {[
+                  { label: '空间主页', href: activeSpaceId ? `/space/${activeSpaceId}/profile` : '/profile' },
+                  { label: '关系工具箱', href: activeSpaceId ? `/space/${activeSpaceId}/tools` : '/spaces' },
+                  { label: '返回概览', href: '/spaces' },
+                ].map((item) => (
+                  <Pressable
+                    key={item.label}
+                    onPress={() => {
+                      setMenuVisible(false);
+                      router.push(item.href as Href);
+                    }}
+                    className="min-h-[46px] justify-center rounded-[18px] px-3"
+                  >
+                    <Text className="text-[15px] font-extrabold" style={clayText.title}>
+                      {item.label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </ClaySurface>
+            </Pressable>
+          </Modal>
+
           <ScrollView
+            ref={scrollRef}
             className="flex-1"
             contentContainerStyle={{ paddingHorizontal: 18, paddingBottom: 18 }}
             showsVerticalScrollIndicator={false}
@@ -200,49 +235,11 @@ export default function ChatScreen() {
               <View className="mb-5 flex-row items-center">
                 <RelationshipAvatar asset="ami" size={42} />
                 <ClaySurface className="ml-3 px-4 py-3" radius={24}>
-                  <Text className="text-[15px] font-bold" style={[clayText.body, { color: clay.color.lavenderDeep }]}>
-                    {chatMode === 'group' ? 'Ami 正在组织一段适合三个人看的回复...' : 'Ami 正在组织一句只给你的回复...'}
-                  </Text>
+                  <TypingDots color={room.accent} />
                 </ClaySurface>
               </View>
             ) : null}
 
-            <ClaySurface className="mt-2 px-5 py-5" radius={34}>
-              <View className="flex-row items-start">
-                <GeneratedAsset asset="calendar" size={92} rounded={28} />
-                <View className="ml-4 flex-1">
-                  <View className="flex-row items-center">
-                    <Sparkles color={clay.color.lavenderDeep} size={18} />
-                    <Text className="ml-2 text-xs font-extrabold" style={[clayText.title, { color: clay.color.lavenderDeep }]}>
-                      DATE PLAN
-                    </Text>
-                  </View>
-                  <Text className="mt-2 text-[21px] leading-7" style={clayText.display}>
-                    {mock.datePlan.title}
-                  </Text>
-                  <Text className="mt-2 text-[14px] leading-5" style={clayText.body}>
-                    {mock.datePlan.subtitle}
-                  </Text>
-                </View>
-              </View>
-              <View className="mt-4 flex-row flex-wrap">
-                {mock.datePlan.items.map((item) => (
-                  <View key={item} className="mb-2 mr-2 rounded-full px-3 py-2" style={{ backgroundColor: clay.color.lavenderSoft }}>
-                    <Text className="text-xs font-bold" style={[clayText.body, { color: clay.color.ink }]}>
-                      {item}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-              <View className="mt-2 flex-row gap-3">
-                <ClayButton className="flex-1" variant="secondary" onPress={() => handleSend('我想把预算再压低一点')}>
-                  调整偏好
-                </ClayButton>
-                <ClayButton className="flex-1" onPress={mock.acceptDatePlan} disabled={mock.datePlan.accepted}>
-                  {mock.datePlan.accepted ? '已确认' : '确认计划'}
-                </ClayButton>
-              </View>
-            </ClaySurface>
           </ScrollView>
 
           <View className="mb-[82px] px-5 pb-3 pt-2" style={{ backgroundColor: room.inputAreaBackground }}>
@@ -272,7 +269,19 @@ export default function ChatScreen() {
             </ScrollView>
             <View className="flex-row items-center gap-3">
               <ClayInput className="flex-1" value={draft} onChangeText={setDraft} placeholder={room.placeholder} />
-              <ClayButton className="h-[50px] w-[54px] px-0" onPress={() => handleSend()} icon={<SendHorizontal color={clay.color.white} size={20} />} />
+              <View
+                className="h-[50px] w-[54px] overflow-hidden rounded-[22px]"
+                style={[{ backgroundColor: room.sendButton, opacity: isTyping ? 0.58 : 1 }, clayShadow.button]}
+              >
+                <Pressable
+                  onPress={() => handleSend()}
+                  disabled={isTyping}
+                  className="flex-1 items-center justify-center"
+                  style={({ pressed }) => ({ transform: [{ scale: pressed ? 0.94 : 1 }] })}
+                >
+                  <SendHorizontal color={clay.color.white} size={20} strokeWidth={2.8} />
+                </Pressable>
+              </View>
             </View>
           </View>
         </KeyboardAvoidingView>
@@ -281,15 +290,51 @@ export default function ChatScreen() {
   );
 }
 
+function TypingDots({ color }: { color: string }) {
+  const pulse = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1, duration: 520, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0, duration: 520, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+      ]),
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [pulse]);
+
+  return (
+    <View className="h-6 flex-row items-center gap-2">
+      {[0, 1, 2].map((index) => (
+        <Animated.View
+          key={index}
+          className="h-2.5 w-2.5 rounded-full"
+          style={{
+            backgroundColor: color,
+            opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.35 + index * 0.12, 1 - index * 0.12] }),
+            transform: [
+              {
+                translateY: pulse.interpolate({ inputRange: [0, 1], outputRange: [index % 2 === 0 ? 1 : -1, index % 2 === 0 ? -3 : 3] }),
+              },
+            ],
+          }}
+        />
+      ))}
+    </View>
+  );
+}
+
 function getRoomPresentation(chatMode: 'agent' | 'group') {
   if (chatMode === 'group') {
     return {
       title: '三人关系群聊',
       subtitle: '你、对方与 Ami 在同一个共享空间',
-      eyebrow: 'SHARED ROOM',
+      eyebrow: '双方可见',
       notice: '这里的消息双方都能看到，Ami 只会使用共享关系上下文，不会带出任何私聊内容。',
       placeholder: '输入适合三个人一起看的话...',
       accent: clay.color.celadonDeep,
+      sendButton: '#227B67',
       noticeBackground: '#EFFAF6',
       inputAreaBackground: 'rgba(239,250,246,0.78)',
       mineBubble: clay.color.celadonDeep,
@@ -299,19 +344,13 @@ function getRoomPresentation(chatMode: 'agent' | 'group') {
   return {
     title: '只和 Ami 聊',
     subtitle: '这一页只属于你和 Ami',
-    eyebrow: 'PRIVATE ROOM',
+    eyebrow: '只对你可见',
     notice: '私聊内容只用于你的个人上下文，不会同步给对方，也不会出现在群聊回复里。',
     placeholder: '输入只想让 Ami 听见的话...',
     accent: clay.color.lavenderDeep,
+    sendButton: '#5A43D6',
     noticeBackground: clay.color.lavenderSoft,
     inputAreaBackground: 'rgba(246,243,251,0.78)',
     mineBubble: clay.color.lavender,
   };
-}
-
-function connectionStateLabel(state: 'connecting' | 'open' | 'reconnecting' | 'closed') {
-  if (state === 'open') return '已连接';
-  if (state === 'reconnecting') return '重连中';
-  if (state === 'connecting') return '连接中';
-  return '已关闭';
 }
