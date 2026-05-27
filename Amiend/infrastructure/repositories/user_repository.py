@@ -79,6 +79,8 @@ class UserRepository:
             "id": user_id or str(uuid4()),
             "username": username,
             "email": email.lower(),
+            "preferred_name": username,
+            "avatar_url": "",
             "password_hash": password_hash,
             "is_active": True,
             "email_verified_at": email_verified_at,
@@ -107,6 +109,51 @@ class UserRepository:
         )
         return result.modified_count > 0
 
+    async def update_profile(
+        self,
+        user_id: str,
+        preferred_name: Optional[str] = None,
+        avatar_url: Optional[str] = None,
+    ) -> Optional[DBUser]:
+        await self._ensure_indexes()
+        set_fields = {"updated_at": datetime.now(timezone.utc)}
+        if preferred_name is not None:
+            set_fields["preferred_name"] = preferred_name
+        if avatar_url is not None:
+            set_fields["avatar_url"] = avatar_url
+        result = await self._collection.find_one_and_update(
+            {"id": user_id},
+            {"$set": set_fields},
+            return_document=ReturnDocument.AFTER,
+        )
+        return self._to_user(result)
+
+    async def update_contact(
+        self,
+        user_id: str,
+        email: Optional[str] = None,
+        phone: Optional[str] = None,
+        email_verified_at=None,
+        phone_verified_at=None,
+    ) -> Optional[DBUser]:
+        await self._ensure_indexes()
+        set_fields = {"updated_at": datetime.now(timezone.utc)}
+        if email is not None:
+            set_fields["email"] = email.lower()
+            set_fields["email_verified_at"] = email_verified_at
+        if phone is not None:
+            set_fields["phone"] = phone
+            set_fields["phone_verified_at"] = phone_verified_at
+        try:
+            result = await self._collection.find_one_and_update(
+                {"id": user_id},
+                {"$set": set_fields},
+                return_document=ReturnDocument.AFTER,
+            )
+        except DuplicateKeyError:
+            return None
+        return self._to_user(result)
+
     async def set_active(self, user_id: str, is_active: bool) -> bool:
         await self._ensure_indexes()
         result = await self._collection.update_one(
@@ -134,6 +181,7 @@ class UserRepository:
         set_fields = {
             "username": username,
             "email": email.lower(),
+            "preferred_name": username,
             "password_hash": password_hash,
             "is_active": True,
             "email_verified_at": email_verified_at,

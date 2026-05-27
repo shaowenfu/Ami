@@ -84,6 +84,9 @@ jobs:
           JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
           MONGODB_ATLAS_URI: ${{ secrets.MONGODB_ATLAS_URI }}
           REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          MEM0_ENABLED: ${{ vars.MEM0_ENABLED || 'false' }}
+          MEM0_API_KEY: ${{ secrets.MEM0_API_KEY }}
         shell: bash
         run: |
           set -euo pipefail
@@ -98,6 +101,7 @@ jobs:
             JWT_SECRET_KEY
             MONGODB_ATLAS_URI
             REDIS_PASSWORD
+            LLM_API_KEY
           )
           for name in "${required_names[@]}"; do
             if [ -z "${!name:-}" ]; then
@@ -105,6 +109,14 @@ jobs:
               exit 1
             fi
           done
+          case "${MEM0_ENABLED}" in
+            true|1|yes|on)
+              if [ -z "${MEM0_API_KEY:-}" ]; then
+                echo "Missing required deployment secret: MEM0_API_KEY because MEM0_ENABLED=true" >&2
+                exit 1
+              fi
+              ;;
+          esac
 
       - name: Copy compose file to server
         uses: appleboy/scp-action@v0.1.7
@@ -127,21 +139,22 @@ jobs:
           ACR_IMAGE_NAME: ${{ vars.ACR_IMAGE_NAME }}
           ACR_USERNAME: ${{ vars.ACR_USERNAME }}
           ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
-          APP_NAME: ${{ vars.APP_NAME || 'Ami' }}
-          APP_VERSION: ${{ vars.APP_VERSION || '0.1.0' }}
           CORS_ORIGINS: ${{ vars.CORS_ORIGINS || '*' }}
-          MONGO_DATABASE: ${{ vars.MONGO_DATABASE || 'ami' }}
           MONGODB_ATLAS_URI: ${{ secrets.MONGODB_ATLAS_URI }}
           JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
           REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
-          LLM_BASE_URL: ${{ vars.LLM_BASE_URL || 'https://api.openai.com/v1' }}
-          LLM_MODEL: ${{ vars.LLM_MODEL || 'gpt-4o-mini' }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          MEM0_ENABLED: ${{ vars.MEM0_ENABLED || 'false' }}
+          MEM0_API_KEY: ${{ secrets.MEM0_API_KEY }}
+          SMTP_HOST: ${{ vars.SMTP_HOST }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM: ${{ vars.SMTP_FROM }}
         with:
           host: ${{ secrets.SERVER_SSH_HOST }}
           username: ${{ secrets.SERVER_SSH_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
-          envs: DEPLOY_DIR,IMAGE_REF,REDIS_IMAGE,ACR_REGISTRY,ACR_IMAGE_NAME,ACR_USERNAME,ACR_PASSWORD,APP_NAME,APP_VERSION,CORS_ORIGINS,MONGO_DATABASE,MONGODB_ATLAS_URI,JWT_SECRET_KEY,REDIS_PASSWORD,LLM_BASE_URL,LLM_MODEL,LLM_API_KEY
+          envs: DEPLOY_DIR,IMAGE_REF,REDIS_IMAGE,ACR_REGISTRY,ACR_IMAGE_NAME,ACR_USERNAME,ACR_PASSWORD,CORS_ORIGINS,MONGODB_ATLAS_URI,JWT_SECRET_KEY,REDIS_PASSWORD,LLM_API_KEY,MEM0_ENABLED,MEM0_API_KEY,SMTP_HOST,SMTP_USERNAME,SMTP_PASSWORD,SMTP_FROM
           script_stop: true
           timeout: 20m
           command_timeout: 60m

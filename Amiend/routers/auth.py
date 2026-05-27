@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Response, status
+import shutil
+from pathlib import Path
+from uuid import uuid4
+
+from fastapi import APIRouter, File, Response, UploadFile, status
 
 from dependencies.providers import AuthServiceDep, CurrentUserIdDep
 from infrastructure.models.user import (
     AccountDeleteRequest,
+    ChangePasswordRequest,
     EmailSendRequest,
     EmailVerificationResponse,
     EmailVerifyRequest,
@@ -18,6 +23,8 @@ from infrastructure.models.user import (
     SmsVerificationResponse,
     SmsVerifyRequest,
     TokenPair,
+    UpdateContactRequest,
+    UpdateProfileRequest,
     UserResponse,
 )
 
@@ -167,6 +174,23 @@ async def delete_account(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.patch(
+    "/password",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="修改密码（原密码或验证码）",
+    description="当前登录用户可通过原密码，或邮箱/短信验证码 ticket 修改密码。需 JWT 鉴权。",
+)
+async def change_password(
+    payload: ChangePasswordRequest,
+    auth_service: AuthServiceDep,
+    current_user_id: CurrentUserIdDep,
+) -> Response:
+    """Change the current user's password."""
+
+    await auth_service.change_password(payload, str(current_user_id))
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get(
     "/me",
     response_model=UserResponse,
@@ -180,3 +204,73 @@ async def get_me(
     """Return the profile of the current user."""
 
     return await auth_service.get_me(str(current_user_id))
+
+
+@router.patch(
+    "/me",
+    response_model=UserResponse,
+    summary="更新当前用户个人资料",
+    description="更新全局 Profile 中展示的昵称和头像地址。需 JWT 鉴权。",
+)
+async def update_me(
+    payload: UpdateProfileRequest,
+    auth_service: AuthServiceDep,
+    current_user_id: CurrentUserIdDep,
+) -> UserResponse:
+    """Update profile fields for the current user."""
+
+    return await auth_service.update_profile(payload, str(current_user_id))
+
+
+@router.patch(
+    "/me/contact",
+    response_model=UserResponse,
+    summary="修改绑定邮箱或手机号",
+    description="修改邮箱需先对新邮箱完成 register 场景邮箱验证码验证；修改手机号需先对新手机号完成 register 场景短信验证码验证。",
+)
+async def update_contact(
+    payload: UpdateContactRequest,
+    auth_service: AuthServiceDep,
+    current_user_id: CurrentUserIdDep,
+) -> UserResponse:
+    """Update bound email or phone for the current user."""
+
+    return await auth_service.update_contact(payload, str(current_user_id))
+
+
+@router.post(
+    "/me/avatar",
+    response_model=UserResponse,
+    summary="上传头像",
+    description="上传当前用户头像文件，服务端保存到 static/avatars 并更新 avatar_url。",
+)
+async def upload_avatar(
+    auth_service: AuthServiceDep,
+    current_user_id: CurrentUserIdDep,
+    file: UploadFile = File(...),
+) -> UserResponse:
+    """Upload and bind an avatar image for the current user."""
+
+    content_type = file.content_type or ""
+    if not content_type.startswith("image/"):
+        from core.exceptions import InvalidCredentialsError
+
+        raise InvalidCredentialsError(message="头像必须是图片文件。")
+
+    extension = Path(file.filename or "").suffix.lower()
+    if extension not in {".jpg", ".jpeg", ".png", ".webp"}:
+        extension = ".jpg"
+
+    avatar_dir = Path("static") / "avatars"
+    avatar_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"{current_user_id}-{uuid4().hex}{extension}"
+    target = avatar_dir / filename
+    with target.open("wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    await file.close()
+
+    avatar_url = f"/static/avatars/{filename}"
+    return await auth_service.update_profile(
+        UpdateProfileRequest(avatar_url=avatar_url),
+        str(current_user_id),
+    )

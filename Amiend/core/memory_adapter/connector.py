@@ -122,12 +122,7 @@ class _Mem0PlatformBackend(MemoryBackend):
         except ImportError as exc:  # pragma: no cover - depends on optional SDK
             raise RuntimeError("mem0ai is not installed. Add `mem0ai` to the backend environment.") from exc
 
-        kwargs: dict[str, str] = {"api_key": settings.mem0_api_key}
-        if settings.mem0_org_id:
-            kwargs["org_id"] = settings.mem0_org_id
-        if settings.mem0_project_id:
-            kwargs["project_id"] = settings.mem0_project_id
-        self._client = MemoryClient(**kwargs)
+        self._client = MemoryClient(api_key=settings.mem0_api_key)
 
     def add(
         self,

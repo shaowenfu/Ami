@@ -27,6 +27,7 @@ from core.exceptions import (
 )
 from infrastructure.models.user import (
     AccountDeleteRequest,
+    ChangePasswordRequest,
     DBUser,
     EmailScene,
     EmailSendRequest,
@@ -41,6 +42,8 @@ from infrastructure.models.user import (
     SmsVerificationResponse,
     SmsVerifyRequest,
     TokenPair,
+    UpdateContactRequest,
+    UpdateProfileRequest,
     UserResponse,
 )
 from infrastructure.repositories.user_repository import UserRepository
@@ -438,6 +441,76 @@ class AuthService:
             raise InvalidCredentialsError(message="用户不存在。")
         return UserResponse.model_validate(user)
 
+    async def update_profile(self, payload: UpdateProfileRequest, user_id: str) -> UserResponse:
+        user = await self._user_repository.update_profile(
+            user_id=user_id,
+            preferred_name=payload.preferred_name,
+            avatar_url=payload.avatar_url,
+        )
+        if user is None:
+            raise InvalidCredentialsError(message="用户不存在。")
+        return UserResponse.model_validate(user)
+
+    async def update_contact(self, payload: UpdateContactRequest, user_id: str) -> UserResponse:
+        current = await self._user_repository.get_by_id(user_id)
+        if current is None:
+            raise InvalidCredentialsError(message="用户不存在。")
+        if not current.is_active:
+            raise InactiveUserError()
+
+        email_verified_at = None
+        phone_verified_at = None
+        if payload.email:
+            existing_email = await self._ensure_email_available(payload.email)
+            if existing_email is not None and existing_email.id != user_id:
+                raise UserAlreadyExistsError(detail="邮箱已被注册。")
+            await self._consume_email_ticket(
+                EmailScene.REGISTER,
+                payload.email,
+                payload.email_verification_ticket or "",
+            )
+            email_verified_at = datetime.now(timezone.utc)
+        if payload.phone:
+            await self._ensure_phone_available(payload.phone, allowed_user_id=user_id)
+            await self._consume_ticket(
+                SmsScene.REGISTER,
+                payload.phone,
+                payload.phone_verification_ticket or "",
+            )
+            phone_verified_at = datetime.now(timezone.utc)
+
+        updated = await self._user_repository.update_contact(
+            user_id=user_id,
+            email=payload.email,
+            phone=payload.phone,
+            email_verified_at=email_verified_at,
+            phone_verified_at=phone_verified_at,
+        )
+        if updated is None:
+            raise UserAlreadyExistsError(detail="邮箱或手机号已被绑定。")
+        return UserResponse.model_validate(updated)
+
+    async def change_password(self, payload: ChangePasswordRequest, user_id: str) -> None:
+        user = await self._user_repository.get_by_id(user_id)
+        if user is None:
+            raise InvalidCredentialsError(message="用户不存在。")
+        if not user.is_active:
+            raise InactiveUserError()
+
+        if payload.old_password:
+            if not self._verify_password(payload.old_password, user.password_hash):
+                raise InvalidCredentialsError(message="原密码错误。")
+        else:
+            if payload.verification_ticket is None:
+                raise InvalidVerificationCodeError()
+            await self._consume_password_change_ticket(user, payload.verification_ticket)
+
+        self._assert_password_complexity(payload.new_password)
+        password_hash = self._hash_password(payload.new_password)
+        updated = await self._user_repository.update_password(user.id, password_hash)
+        if not updated:
+            raise InvalidCredentialsError(message="用户不存在。")
+
     # ------------------------------------------------------------------
     # Account deletion (deactivation)
     # ------------------------------------------------------------------
@@ -623,6 +696,18 @@ class AuthService:
             return
         if user.phone:
             sms_key = self._sms_ticket_key(SmsScene.ACCOUNT_DELETE, user.phone, ticket)
+            removed = await self._redis.delete(sms_key)
+            if removed:
+                return
+        raise InvalidVerificationCodeError(message="验证码凭证无效或已过期。")
+
+    async def _consume_password_change_ticket(self, user: DBUser, ticket: str) -> None:
+        email_key = self._email_ticket_key(EmailScene.PASSWORD_CHANGE, user.email, ticket)
+        removed = await self._redis.delete(email_key)
+        if removed:
+            return
+        if user.phone:
+            sms_key = self._sms_ticket_key(SmsScene.PASSWORD_CHANGE, user.phone, ticket)
             removed = await self._redis.delete(sms_key)
             if removed:
                 return

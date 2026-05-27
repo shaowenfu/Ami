@@ -1,25 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cat > .env.production <<EOF
-APP_NAME=${APP_NAME}
-APP_VERSION=${APP_VERSION}
-JWT_SECRET_KEY=${JWT_SECRET_KEY}
-JWT_ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=15
-REFRESH_TOKEN_EXPIRE_MINUTES=10080
-CORS_ORIGINS=${CORS_ORIGINS}
-REDIS_HOST=redis
-REDIS_PORT=6379
-REDIS_PASSWORD=${REDIS_PASSWORD}
-MONGO_URI=${MONGODB_ATLAS_URI}
-MONGO_DATABASE=${MONGO_DATABASE}
-MEMORY_ENABLED=false
-DEFAULT_MODEL_PROVIDER=custom
-LLM_API_KEY=${LLM_API_KEY:-}
-LLM_BASE_URL=${LLM_BASE_URL}
-LLM_MODEL=${LLM_MODEL}
-EOF
+write_env() {
+  printf '%s=%s\n' "$1" "$2" >> .env.production
+}
+
+: > .env.production
+write_env JWT_SECRET_KEY "${JWT_SECRET_KEY}"
+write_env CORS_ORIGINS "${CORS_ORIGINS}"
+write_env REDIS_HOST redis
+write_env REDIS_PASSWORD "${REDIS_PASSWORD}"
+write_env MONGO_URI "${MONGODB_ATLAS_URI}"
+write_env MEM0_ENABLED "${MEM0_ENABLED:-false}"
+write_env MEM0_API_KEY "${MEM0_API_KEY:-}"
+write_env LLM_API_KEY "${LLM_API_KEY:-}"
+write_env SMTP_HOST "${SMTP_HOST:-}"
+write_env SMTP_USERNAME "${SMTP_USERNAME:-}"
+write_env SMTP_PASSWORD "${SMTP_PASSWORD:-}"
+write_env SMTP_FROM "${SMTP_FROM:-}"
 
 echo "${ACR_PASSWORD}" | docker login "${ACR_REGISTRY}" -u "${ACR_USERNAME}" --password-stdin
 

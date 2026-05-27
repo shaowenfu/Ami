@@ -16,6 +16,8 @@ class DBUser(BaseModel):
     username: str = ""
     email: str = ""
     phone: Optional[str] = None
+    preferred_name: str = ""
+    avatar_url: str = ""
     password_hash: str = Field(default="", repr=False)
     is_active: bool = True
     email_verified_at: Optional[datetime] = None
@@ -35,6 +37,7 @@ class VerificationScene(str, Enum):
     REGISTER = "register"
     LOGIN = "login"
     ACCOUNT_DELETE = "account_delete"
+    PASSWORD_CHANGE = "password_change"
 
 
 SmsScene = VerificationScene
@@ -133,6 +136,7 @@ class UserResponse(BaseModel):
     email: str = ""
     phone: Optional[str] = None
     preferred_name: str = ""
+    avatar_url: str = ""
     is_active: bool
     email_verified_at: Optional[datetime] = None
     phone_verified_at: Optional[datetime] = None
@@ -217,5 +221,80 @@ class AccountDeleteRequest(BaseModel):
     @model_validator(mode="after")
     def ensure_one_factor(self) -> "AccountDeleteRequest":
         if not (self.password or self.verification_ticket):
-            raise ValueError("需提供密码或短信验证码凭证之一。")
+            raise ValueError("需提供密码或验证码凭证之一。")
+        return self
+
+
+class UpdateProfileRequest(BaseModel):
+    """Request body for updating user-facing profile fields."""
+
+    preferred_name: Optional[str] = Field(default=None, max_length=40)
+    avatar_url: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("preferred_name", "avatar_url")
+    @classmethod
+    def strip_optional_text(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        return value.strip()
+
+
+class UpdateContactRequest(BaseModel):
+    """Request body for rebinding email or phone after code verification."""
+
+    email: Optional[str] = Field(default=None, min_length=5, max_length=254)
+    email_verification_ticket: Optional[str] = Field(default=None, min_length=1)
+    phone: Optional[str] = Field(default=None, min_length=6, max_length=20)
+    phone_verification_ticket: Optional[str] = Field(default=None, min_length=1)
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        cleaned = value.strip().lower()
+        if "@" not in cleaned or "." not in cleaned.rsplit("@", 1)[-1]:
+            raise ValueError("邮箱格式不正确。")
+        return cleaned
+
+    @field_validator("phone")
+    @classmethod
+    def normalize_phone(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+    @model_validator(mode="after")
+    def ensure_requested_contact_has_ticket(self) -> "UpdateContactRequest":
+        if not self.email and not self.phone:
+            raise ValueError("需提供邮箱或手机号。")
+        if self.email and not self.email_verification_ticket:
+            raise ValueError("修改邮箱需提供邮箱验证码凭证。")
+        if self.phone and not self.phone_verification_ticket:
+            raise ValueError("修改手机号需提供短信验证码凭证。")
+        return self
+
+
+class ChangePasswordRequest(BaseModel):
+    """Request body for changing the current user's password."""
+
+    new_password: str = Field(min_length=6, max_length=128)
+    old_password: Optional[str] = Field(default=None, min_length=0, max_length=128)
+    verification_ticket: Optional[str] = Field(default=None, min_length=1)
+
+    @field_validator("old_password")
+    @classmethod
+    def blank_old_password_to_none(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        return value if value.strip() else None
+
+    @model_validator(mode="after")
+    def ensure_one_factor_and_password_complexity(self) -> "ChangePasswordRequest":
+        if not (self.old_password or self.verification_ticket):
+            raise ValueError("需提供原密码或验证码凭证之一。")
+        pwd = self.new_password
+        if not any(ch.isalpha() for ch in pwd) or not any(not ch.isalnum() for ch in pwd):
+            raise ValueError("密码需包含字母或数字中的至少一种，且至少包含一个符号。")
         return self
