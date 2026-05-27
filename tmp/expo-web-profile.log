@@ -1,0 +1,16 @@
+env: load .env
+env: export EXPO_PUBLIC_AMI_API_BASE_URL EXPO_PUBLIC_AMI_ACCESS_TOKEN EXPO_PUBLIC_AMI_SPACE_ID EXPO_PUBLIC_AMI_USER_ID
+Starting project at E:\MyProjects\Ami\Amiapp
+Starting Metro Bundler
+Waiting on http://localhost:8081
+Logs for your project will appear below.
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.7% (754/755)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.9% (2441/2443)
+Web Bundled 6360ms node_modules\expo-router\entry.js (2447 modules)
+ LOG  [web] Logs will appear in the browser console
+Web node_modules\expo-router\entry.js ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 158ms node_modules\expo-router\entry.js (1 module)
+ LOG  [web] Logs will appear in the browser console
+Web node_modules\expo-router\entry.js ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 146ms node_modules\expo-router\entry.js (1 module)
+ LOG  [web] Logs will appear in the browser console
