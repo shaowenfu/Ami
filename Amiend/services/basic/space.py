@@ -8,6 +8,7 @@ from infrastructure.models.space import (
     CreateSpaceInvitationRequest,
     SpaceInvitationResponse,
     SpaceInvitationStatus,
+    SpaceMemberProfile,
     SpaceResponse,
     SpaceStatus,
     UpdateAgentProfileRequest,
@@ -29,11 +30,11 @@ class SpaceService:
 
     async def list_spaces(self, current_user_id: str) -> list[SpaceResponse]:
         spaces = await self._space_repository.list_spaces_for_user(current_user_id)
-        return [SpaceResponse.from_db(space) for space in spaces]
+        return [await self._space_response(space) for space in spaces]
 
     async def get_space(self, space_id: str, current_user_id: str) -> SpaceResponse:
         space = await self._require_space_member(space_id, current_user_id)
-        return SpaceResponse.from_db(space)
+        return await self._space_response(space)
 
     async def create_invitation(
         self,
@@ -135,12 +136,25 @@ class SpaceService:
         space = await self._require_space_member(space_id, current_user_id)
         profile = AgentProfile(
             name=payload.name or space.agent_profile.name,
-            tone=payload.tone or space.agent_profile.tone,
+            self_recognition=(
+                payload.self_recognition
+                if payload.self_recognition is not None
+                else space.agent_profile.self_recognition
+            ),
+            prompt=payload.prompt
+            if payload.prompt is not None
+            else space.agent_profile.prompt,
         )
         updated = await self._space_repository.update_agent_profile(space_id, profile)
         if updated is None:
             raise ResourceNotFoundError(message="Space not found.")
-        return SpaceResponse.from_db(updated)
+        return await self._space_response(updated)
+
+    async def dissolve_space(self, space_id: str, current_user_id: str) -> None:
+        await self._require_space_member(space_id, current_user_id)
+        updated = await self._space_repository.dissolve_space(space_id)
+        if updated is None:
+            raise ResourceNotFoundError(message="Space not found.")
 
     async def _require_space_member(self, space_id: str, user_id: str):
         space = await self._space_repository.get_space_by_id(space_id)
@@ -157,3 +171,13 @@ class SpaceService:
         if invitation.status != SpaceInvitationStatus.PENDING:
             raise ConflictError(message="Invitation is not pending.")
         return invitation
+
+    async def _space_response(self, space) -> SpaceResponse:
+        profiles: list[SpaceMemberProfile] = []
+        for member_id in space.member_ids:
+            user = await self._user_repository.get_by_id(member_id)
+            if user is not None:
+                profiles.append(SpaceMemberProfile.from_user(user))
+        response = SpaceResponse.from_db(space)
+        response.member_profiles = profiles
+        return response

@@ -70,3 +70,26 @@ class MessageRepository:
         messages = [DBMessage.model_validate(document) async for document in cursor]
         messages.reverse()
         return messages
+
+    async def list_messages_between(
+        self,
+        *,
+        space_id: str,
+        room_scope: str,
+        start_at: datetime,
+        end_at: datetime,
+        limit: int = 500,
+    ) -> list[DBMessage]:
+        await self._ensure_indexes()
+        cursor = (
+            self._collection.find(
+                {
+                    "space_id": space_id,
+                    "room_scope": room_scope,
+                    "created_at": {"$gte": start_at, "$lt": end_at},
+                }
+            )
+            .sort("created_at", ASCENDING)
+            .limit(limit)
+        )
+        return [DBMessage.model_validate(document) async for document in cursor]

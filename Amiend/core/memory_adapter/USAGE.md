@@ -56,10 +56,10 @@ private_user_id = f"space:{space_id}:private:{user_id}"
 shared_user_id = f"space:{space_id}:shared"
 agent_id = f"ami:{space_id}"
 ```
-私聊查询只能召回当前用户私聊记忆与 shared 记忆；群聊查询只能召回 shared 记忆。业务层应优先通过 `services.basic.chat_context.ChatContextBuilder` 统一构建 filters。
+私聊查询只能召回当前用户私聊记忆与 shared 记忆；群聊查询只能召回 shared 记忆。业务层应优先通过 `services.basic.chat_context.ContextOrchestrator` 统一构建 filters。
 
 ## 5. 运维提示
-- 适配器内部是同步实现；异步服务中建议使用 `asyncio.to_thread` 包裹，当前 `ChatContextBuilder` 已这样处理。
+- 适配器内部是同步实现；异步服务中建议使用 `asyncio.to_thread` 包裹，当前 `ContextOrchestrator` 已这样处理。
 - 真正的瓶颈通常是 Mem0 / LLM 请求配额，注意监控调用量与失败率。
 - 若后续要拆分成独立服务，直接连同 `.env` 配置一起复制整个 `core/memory_adapter` 目录即可，无需调整其他代码。
 

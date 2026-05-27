@@ -15,11 +15,11 @@ from infrastructure.models.message import (
     MessageSenderType,
     RoomScopeInput,
 )
-from infrastructure.models.space import SpaceStatus
+from infrastructure.models.space import DBSpace, SpaceStatus
 from infrastructure.repositories.message_repository import MessageRepository
 from infrastructure.repositories.space_repository import SpaceRepository
 from services.basic.chat_context import (
-    ChatContextBuilder,
+    ContextOrchestrator,
     ami_agent_id,
     memory_visibility_for_room,
     private_memory_user_id,
@@ -43,13 +43,13 @@ class MessageService:
         space_repository: SpaceRepository,
         event_bus: SseEventBus,
         model_service_factory: Callable[[], "ModelService"],
-        context_builder: ChatContextBuilder,
+        context_orchestrator: ContextOrchestrator,
     ) -> None:
         self._message_repository = message_repository
         self._space_repository = space_repository
         self._event_bus = event_bus
         self._model_service_factory = model_service_factory
-        self._context_builder = context_builder
+        self._context_orchestrator = context_orchestrator
 
     async def list_messages(
         self,
@@ -117,16 +117,13 @@ class MessageService:
         target_user_ids = None if room_scope == "SHARED" else {current_user_id}
         chunks: list[str] = []
         try:
+            space = await self._require_space_member(space_id, current_user_id)
             model_service = self._model_service_factory()
-            chat_context = await self._context_builder.build_chat_context(
-                space_id=space_id,
+            system_prompt = await self._context_orchestrator.build_context(
+                space=space,
                 current_user_id=current_user_id,
                 room_scope=room_scope,
                 query=user_input,
-            )
-            system_prompt = self._build_system_prompt(
-                room_scope=room_scope,
-                context_block=chat_context.to_prompt_block(),
             )
             async for chunk in model_service.generate_response_stream(
                 system_prompt=system_prompt,
@@ -255,36 +252,16 @@ class MessageService:
                 str(exc),
             )
 
-    async def _require_space_member(self, space_id: str, user_id: str) -> None:
+    async def _require_space_member(self, space_id: str, user_id: str) -> DBSpace:
         space = await self._space_repository.get_space_by_id(space_id)
         if space is None or space.status != SpaceStatus.ACTIVE:
             raise ResourceNotFoundError(message="Space not found.")
         if user_id not in space.member_ids:
             raise PermissionDeniedError(message="You are not a member of this space.")
+        return space
 
     @staticmethod
     def _resolve_room_scope(room_scope: RoomScopeInput, current_user_id: str) -> str:
         if room_scope == RoomScopeInput.SHARED:
             return "SHARED"
         return f"PRIVATE:{current_user_id}"
-
-    @staticmethod
-    def _build_system_prompt(room_scope: str, context_block: str) -> str:
-        privacy_rule = (
-            "This is a shared room with both partners and Ami. Never mention private-room facts."
-            if room_scope == "SHARED"
-            else "This is a private room between the current user and Ami. Do not reveal it to the partner."
-        )
-        prompt = (
-            "You are Ami, a warm relationship companion for a two-person relationship space. "
-            "Reply in concise, gentle Chinese. Help the user feel heard, clarify needs, and suggest one small next step. "
-            f"{privacy_rule}"
-        )
-        if not context_block:
-            return prompt
-        return (
-            f"{prompt}\n\n"
-            "Use the following context only when it is relevant. "
-            "Do not quote internal ids or expose private-room context in shared-room replies.\n\n"
-            f"{context_block}"
-        )

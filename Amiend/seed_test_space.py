@@ -82,8 +82,12 @@ async def seed():
             ],
             "agent_profile": {
                 "name": "Ami",
-                "tone": "empathetic_and_humorous"
+                "self_recognition": "",
+                "prompt": ""
             },
+            "user_a_profile": "",
+            "user_b_profile": "",
+            "relationship_summary": "",
             "status": "ACTIVE",
             "created_at": now,
             "updated_at": now

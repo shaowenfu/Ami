@@ -50,6 +50,15 @@ class SpaceRepository:
         ).sort("updated_at", DESCENDING)
         return [DBSpace.model_validate(document) async for document in cursor]
 
+    async def list_active_spaces(self, *, limit: int = 100) -> list[DBSpace]:
+        await self._ensure_indexes()
+        cursor = (
+            self._spaces.find({"status": SpaceStatus.ACTIVE.value})
+            .sort("updated_at", DESCENDING)
+            .limit(limit)
+        )
+        return [DBSpace.model_validate(document) async for document in cursor]
+
     async def get_space_by_id(self, space_id: str) -> Optional[DBSpace]:
         await self._ensure_indexes()
         return self._to_space(await self._spaces.find_one({"id": space_id}))
@@ -83,6 +92,9 @@ class SpaceRepository:
             ],
             "member_ids": [initiator_user_id, invitee_user_id],
             "agent_profile": AgentProfile().model_dump(),
+            "user_a_profile": "",
+            "user_b_profile": "",
+            "relationship_summary": "",
             "status": SpaceStatus.ACTIVE.value,
             "created_at": now,
             "updated_at": now,
@@ -97,6 +109,45 @@ class SpaceRepository:
             {
                 "$set": {
                     "agent_profile": agent_profile.model_dump(),
+                    "updated_at": datetime.now(timezone.utc),
+                }
+            },
+            return_document=ReturnDocument.AFTER,
+        )
+        return self._to_space(result)
+
+    async def update_context_summaries(
+        self,
+        *,
+        space_id: str,
+        user_a_profile: str,
+        user_b_profile: str,
+        relationship_summary: str,
+        agent_profile: AgentProfile,
+    ) -> Optional[DBSpace]:
+        await self._ensure_indexes()
+        result = await self._spaces.find_one_and_update(
+            {"id": space_id},
+            {
+                "$set": {
+                    "user_a_profile": user_a_profile,
+                    "user_b_profile": user_b_profile,
+                    "relationship_summary": relationship_summary,
+                    "agent_profile": agent_profile.model_dump(),
+                    "updated_at": datetime.now(timezone.utc),
+                }
+            },
+            return_document=ReturnDocument.AFTER,
+        )
+        return self._to_space(result)
+
+    async def dissolve_space(self, space_id: str) -> Optional[DBSpace]:
+        await self._ensure_indexes()
+        result = await self._spaces.find_one_and_update(
+            {"id": space_id},
+            {
+                "$set": {
+                    "status": SpaceStatus.DISSOLVED.value,
                     "updated_at": datetime.now(timezone.utc),
                 }
             },

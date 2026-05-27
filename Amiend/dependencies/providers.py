@@ -13,10 +13,12 @@ from infrastructure.repositories.message_repository import MessageRepository
 from infrastructure.repositories.space_repository import SpaceRepository
 from infrastructure.repositories.user_repository import UserRepository
 from services.basic.auth import AuthService, TokenService
-from services.basic.chat_context import ChatContextBuilder
+from services.basic.chat_context import ContextOrchestrator
 from services.basic.email import EmailService
+from services.basic.heartbeat import HeartbeatService
 from services.basic.llm import ModelService
 from services.basic.message import MessageService
+from services.basic.sleep import SleepDigestService
 from services.basic.sse import SseEventBus
 from services.basic.space import SpaceService
 from services.basic.sms import SmsService
@@ -106,12 +108,12 @@ async def get_current_active_user_id(
     return current_user_id
 
 
-def get_chat_context_builder(
+def get_context_orchestrator(
     message_repository: Annotated[MessageRepository, Depends(get_message_repository)],
-) -> ChatContextBuilder:
+) -> ContextOrchestrator:
     """Provide the single entry point for Mongo + memory chat context."""
 
-    return ChatContextBuilder(message_repository=message_repository)
+    return ContextOrchestrator(message_repository=message_repository)
 
 
 # -----------------------------------------------------------------
@@ -206,7 +208,7 @@ def get_message_service(
     message_repository: Annotated[MessageRepository, Depends(get_message_repository)],
     space_repository: Annotated[SpaceRepository, Depends(get_space_repository)],
     event_bus: Annotated[SseEventBus, Depends(get_sse_event_bus)],
-    context_builder: Annotated[ChatContextBuilder, Depends(get_chat_context_builder)],
+    context_orchestrator: Annotated[ContextOrchestrator, Depends(get_context_orchestrator)],
 ) -> MessageService:
     """Provide space message workflows."""
 
@@ -215,7 +217,32 @@ def get_message_service(
         space_repository=space_repository,
         event_bus=event_bus,
         model_service_factory=lambda: get_model_service(get_config()),
-        context_builder=context_builder,
+        context_orchestrator=context_orchestrator,
+    )
+
+
+def get_sleep_digest_service(
+    space_repository: Annotated[SpaceRepository, Depends(get_space_repository)],
+    message_repository: Annotated[MessageRepository, Depends(get_message_repository)],
+) -> SleepDigestService:
+    """Provide Ami's daily sleep digestion service."""
+
+    return SleepDigestService(
+        space_repository=space_repository,
+        message_repository=message_repository,
+        model_service_factory=lambda: get_model_service(get_config()),
+    )
+
+
+def get_heartbeat_service(
+    space_repository: Annotated[SpaceRepository, Depends(get_space_repository)],
+    message_repository: Annotated[MessageRepository, Depends(get_message_repository)],
+) -> HeartbeatService:
+    """Provide dry-run heartbeat evaluation for proactive behavior."""
+
+    return HeartbeatService(
+        space_repository=space_repository,
+        message_repository=message_repository,
     )
 
 
@@ -226,11 +253,13 @@ def get_message_service(
 UserRepositoryDep = Annotated[UserRepository, Depends(get_user_repository)]
 SpaceRepositoryDep = Annotated[SpaceRepository, Depends(get_space_repository)]
 MessageRepositoryDep = Annotated[MessageRepository, Depends(get_message_repository)]
-ChatContextBuilderDep = Annotated[ChatContextBuilder, Depends(get_chat_context_builder)]
+ContextOrchestratorDep = Annotated[ContextOrchestrator, Depends(get_context_orchestrator)]
 TokenServiceDep = Annotated[TokenService, Depends(get_token_service)]
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
 SpaceServiceDep = Annotated[SpaceService, Depends(get_space_service)]
 MessageServiceDep = Annotated[MessageService, Depends(get_message_service)]
+SleepDigestServiceDep = Annotated[SleepDigestService, Depends(get_sleep_digest_service)]
+HeartbeatServiceDep = Annotated[HeartbeatService, Depends(get_heartbeat_service)]
 SseEventBusDep = Annotated[SseEventBus, Depends(get_sse_event_bus)]
 SmsServiceDep = Annotated[SmsService | _ConsoleSmsService, Depends(get_sms_service)]
 EmailServiceDep = Annotated[EmailService | _ConsoleEmailService, Depends(get_email_service)]

@@ -21,7 +21,7 @@
 
 
 ## 并发考虑
-Mem0 Platform SDK 当前按同步接口接入。异步业务服务调用时应使用 `asyncio.to_thread` 或等价线程池包装，当前 `ChatContextBuilder` 已这样处理，避免阻塞 SSE/HTTP 请求事件循环。
+Mem0 Platform SDK 当前按同步接口接入。异步业务服务调用时应使用 `asyncio.to_thread` 或等价线程池包装，当前 `ContextOrchestrator` 已这样处理，避免阻塞 SSE/HTTP 请求事件循环。
 
 ## 迁移路径
 当需要把记忆系统拆成独立微服务时：

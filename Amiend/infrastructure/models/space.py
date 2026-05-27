@@ -8,6 +8,8 @@ from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from infrastructure.models.user import DBUser
+
 
 class SpaceStatus(str, Enum):
     """Lifecycle state for a relationship space."""
@@ -36,15 +38,21 @@ class AgentProfile(BaseModel):
     """Space-local Ami profile."""
 
     name: str = Field(default="Ami", min_length=1, max_length=40)
-    tone: str = Field(default="empathetic_and_humorous", min_length=1, max_length=80)
+    self_recognition: str = Field(default="", max_length=4000)
+    prompt: str = Field(default="", max_length=4000)
 
-    @field_validator("name", "tone")
+    @field_validator("name")
     @classmethod
-    def strip_text(cls, value: str) -> str:
+    def strip_name(cls, value: str) -> str:
         cleaned = value.strip()
         if not cleaned:
-            raise ValueError("value cannot be empty")
+            raise ValueError("name cannot be empty")
         return cleaned
+
+    @field_validator("self_recognition", "prompt")
+    @classmethod
+    def strip_optional_text(cls, value: str) -> str:
+        return value.strip()
 
 
 class SpaceMember(BaseModel):
@@ -55,6 +63,24 @@ class SpaceMember(BaseModel):
     role: SpaceMemberRole
 
 
+class SpaceMemberProfile(BaseModel):
+    """Public profile for a member inside a relationship space."""
+
+    user_id: str
+    username: str = ""
+    preferred_name: str = ""
+    avatar_url: str = ""
+
+    @classmethod
+    def from_user(cls, user: DBUser) -> "SpaceMemberProfile":
+        return cls(
+            user_id=user.id,
+            username=user.username,
+            preferred_name=user.preferred_name,
+            avatar_url=user.avatar_url,
+        )
+
+
 class DBSpace(BaseModel):
     """Internal MongoDB representation of a relationship space."""
 
@@ -62,6 +88,9 @@ class DBSpace(BaseModel):
     members: list[SpaceMember]
     member_ids: list[str]
     agent_profile: AgentProfile
+    user_a_profile: str = Field(default="", max_length=8000)
+    user_b_profile: str = Field(default="", max_length=8000)
+    relationship_summary: str = Field(default="", max_length=8000)
     status: SpaceStatus
     created_at: datetime
     updated_at: datetime
@@ -126,17 +155,25 @@ class UpdateAgentProfileRequest(BaseModel):
     """Payload for updating the space-local Ami profile."""
 
     name: Optional[str] = Field(default=None, min_length=1, max_length=40)
-    tone: Optional[str] = Field(default=None, min_length=1, max_length=80)
+    self_recognition: Optional[str] = Field(default=None, max_length=4000)
+    prompt: Optional[str] = Field(default=None, max_length=4000)
 
-    @field_validator("name", "tone")
+    @field_validator("name")
     @classmethod
-    def strip_optional_text(cls, value: Optional[str]) -> Optional[str]:
+    def strip_optional_name(cls, value: Optional[str]) -> Optional[str]:
         if value is None:
             return None
         cleaned = value.strip()
         if not cleaned:
-            raise ValueError("value cannot be empty")
+            raise ValueError("name cannot be empty")
         return cleaned
+
+    @field_validator("self_recognition", "prompt")
+    @classmethod
+    def strip_optional_text(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        return value.strip()
 
 
 class SpaceResponse(BaseModel):
@@ -145,7 +182,11 @@ class SpaceResponse(BaseModel):
     id: str
     members: list[SpaceMember]
     member_ids: list[str]
+    member_profiles: list[SpaceMemberProfile] = Field(default_factory=list)
     agent_profile: AgentProfile
+    user_a_profile: str = ""
+    user_b_profile: str = ""
+    relationship_summary: str = ""
     status: SpaceStatus
     created_at: datetime
     updated_at: datetime

@@ -3,6 +3,7 @@ import { create } from 'zustand';
 import {
   acceptSpaceInvitation,
   createSpaceInvitation,
+  deleteSpace as deleteSpaceRequest,
   listInboxInvitations,
   listSpaces,
   rejectSpaceInvitation,
@@ -27,8 +28,9 @@ type SpaceStore = {
   loadSpaces: () => Promise<void>;
   loadInvitations: () => Promise<void>;
   createInvitation: (identifier: string, message: string) => Promise<SpaceInvitationResponse | null>;
-  acceptInvitation: (invitationId: string) => Promise<void>;
+  acceptInvitation: (invitationId: string) => Promise<SpaceInvitationResponse | null>;
   rejectInvitation: (invitationId: string) => Promise<void>;
+  deleteSpace: (spaceId: string) => Promise<boolean>;
   selectSpace: (spaceId: string) => void;
 };
 
@@ -44,7 +46,7 @@ const demoSpaces: SpaceSummary[] = [
 ];
 const defaultSelectedSpaceId = demoSpaces[0]?.id || null;
 
-export const useSpaceStore = create<SpaceStore>((set) => ({
+export const useSpaceStore = create<SpaceStore>((set, get) => ({
   spaces: demoSpaces,
   invitations: [],
   selectedSpaceId: defaultSelectedSpaceId,
@@ -92,14 +94,17 @@ export const useSpaceStore = create<SpaceStore>((set) => ({
       const invitation = await acceptSpaceInvitation(invitationId);
       const spaces = await listSpaces();
       const summaries = spaces.map(mapSpaceSummary);
+      const selectedSpaceId = invitation.space_id ?? summaries[0]?.id ?? null;
       set({
-        invitations: [],
+        invitations: invitationsWithoutId(get().invitations, invitation.id),
         spaces: summaries,
-        selectedSpaceId: invitation.space_id ?? summaries[0]?.id ?? null,
+        selectedSpaceId,
         isLoading: false,
       });
+      return invitation;
     } catch (error) {
       set({ error: readErrorMessage(error), isLoading: false });
+      return null;
     }
   },
   rejectInvitation: async (invitationId) => {
@@ -114,6 +119,24 @@ export const useSpaceStore = create<SpaceStore>((set) => ({
       set({ error: readErrorMessage(error), isLoading: false });
     }
   },
+  deleteSpace: async (spaceId) => {
+    set({ isLoading: true, error: null });
+    try {
+      await deleteSpaceRequest(spaceId);
+      set((state) => {
+        const spaces = state.spaces.filter((space) => space.id !== spaceId);
+        return {
+          spaces,
+          selectedSpaceId: state.selectedSpaceId === spaceId ? spaces[0]?.id ?? null : state.selectedSpaceId,
+          isLoading: false,
+        };
+      });
+      return true;
+    } catch (error) {
+      set({ error: readErrorMessage(error), isLoading: false });
+      return false;
+    }
+  },
   selectSpace: (spaceId) => set({ selectedSpaceId: spaceId }),
 }));
 
@@ -121,7 +144,7 @@ function mapSpaceSummary(space: SpaceResponse): SpaceSummary {
   return {
     id: space.id,
     title: space.agent_profile.name || 'Ami Space',
-    subtitle: `${space.member_ids.length} 位成员 · ${space.agent_profile.tone}`,
+    subtitle: space.relationship_summary || `${space.member_ids.length} 位成员 · Ami 正在学习你们的关系`,
     memberCount: space.member_ids.length,
     status: space.status,
     updatedAt: formatDateLabel(space.updated_at),
@@ -146,4 +169,8 @@ function upsertInvitation(invitations: SpaceInvitationResponse[], next: SpaceInv
     return invitations.map((invitation) => (invitation.id === next.id ? next : invitation));
   }
   return [next, ...invitations];
+}
+
+function invitationsWithoutId(invitations: SpaceInvitationResponse[], invitationId: string) {
+  return invitations.filter((invitation) => invitation.id !== invitationId);
 }

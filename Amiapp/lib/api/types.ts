@@ -3,7 +3,7 @@ export type ResolvedRoomScope = 'SHARED' | `PRIVATE:${string}`;
 export type MessageSenderType = 'USER' | 'AGENT' | 'SYSTEM';
 export type SpaceStatus = 'ACTIVE' | 'DISSOLVED';
 export type SpaceInvitationStatus = 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'CANCELLED';
-export type VerificationScene = 'register' | 'login' | 'account_delete';
+export type VerificationScene = 'register' | 'login' | 'account_delete' | 'password_change';
 
 export type TokenPair = {
   token_type: string;
@@ -19,6 +19,7 @@ export type UserResponse = {
   email: string;
   phone: string | null;
   preferred_name: string;
+  avatar_url: string;
   is_active: boolean;
   email_verified_at: string | null;
   phone_verified_at: string | null;
@@ -33,9 +34,12 @@ export type EmailVerificationResponse = {
   ticket_expires_at?: string | null;
 };
 
+export type SmsVerificationResponse = EmailVerificationResponse;
+
 export type AgentProfile = {
   name: string;
-  tone: string;
+  self_recognition: string;
+  prompt: string;
 };
 
 export type SpaceMember = {
@@ -44,11 +48,22 @@ export type SpaceMember = {
   role: 'INITIATOR' | 'INVITEE';
 };
 
+export type SpaceMemberProfile = {
+  user_id: string;
+  username: string;
+  preferred_name: string;
+  avatar_url: string;
+};
+
 export type SpaceResponse = {
   id: string;
   members: SpaceMember[];
   member_ids: string[];
+  member_profiles: SpaceMemberProfile[];
   agent_profile: AgentProfile;
+  user_a_profile: string;
+  user_b_profile: string;
+  relationship_summary: string;
   status: SpaceStatus;
   created_at: string;
   updated_at: string;
